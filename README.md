@@ -62,6 +62,13 @@ O sistema obriga a trocar a senha no primeiro acesso. Depois:
 3. **Entrada** → lance o estoque inicial (motivo *Compra de fornecedor* ou *Outro*).
 4. **Usuários** → crie os operadores (cada um cria a própria senha no primeiro acesso).
 
+### Liberação temporária de cadastro
+
+Em **Usuários**, no operador, toque em **Liberar cadastro** e escolha o prazo (fim do dia, 24 horas, 7 dias ou data/hora; no máximo 90 dias).
+Enquanto durar, ele vê o menu **Produtos** e pode **cadastrar produtos novos** e **gravar o código de barras** de produtos que ainda não têm — além das entradas e saídas de sempre.
+Não pode alterar produtos existentes, preços, nem ver custos, painel, relatórios, usuários ou auditoria.
+A liberação termina sozinha no prazo; dá para encerrar antes com **Encerrar liberação**. Tudo fica na Auditoria.
+
 ### Leitor de código de barras
 
 - **Câmera**: toque em **Ler código** e aponte para o código de barras ou QR code. Na primeira vez o celular/iPad pede permissão para usar a câmera — toque em **Permitir**.
@@ -92,7 +99,7 @@ Abra o endereço no celular e:
 | Etiquetas | admin | Imprime etiquetas com QR code (folha A4, 3×7, 63,5×38,1 mm — Pimaco A4360) para modeladores sem código de barras. |
 | Estornos | admin | Aprovar ou recusar pedidos dos operadores. |
 | Relatórios | admin | Posição de estoque, extrato, vendas e margem, saídas por cirurgia, reposição, perdas/cortesias, por operador, curva ABC. Exporta para **Excel** e **PDF**. |
-| Usuários | admin | Criar, desativar, redefinir senha (também desbloqueia). |
+| Usuários | admin | Criar, desativar, redefinir senha (também desbloqueia). **Liberar cadastro** temporário para um operador. |
 | Auditoria | admin | Registro permanente de todas as ações. |
 | Configurações | admin | Listas editáveis, **backup completo**, tema claro/escuro. |
 

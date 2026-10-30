@@ -42,6 +42,8 @@ create table if not exists estoque.usuarios (
   criado_em     timestamptz not null default now()
 );
 create unique index if not exists usuarios_login_uk on estoque.usuarios (lower(login));
+-- liberação temporária para operador cadastrar produtos novos (null = sem liberação)
+alter table estoque.usuarios add column if not exists cadastro_ate timestamptz;
 
 create table if not exists estoque.sessoes (
   token_hash  text primary key,
@@ -212,6 +214,11 @@ begin
   return u;
 end $$;
 
+create or replace function estoque._pode_cadastrar(u estoque.usuarios) returns boolean
+language sql stable as $$
+  select u.perfil = 'admin' or coalesce(u.cadastro_ate > now(), false)
+$$;
+
 create or replace function estoque._admin(p_token text) returns estoque.usuarios
 language plpgsql set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios;
@@ -327,7 +334,8 @@ begin
   values (estoque._hash(t), u.id, now() + interval '30 minutes');
   perform estoque._audit(u.id, 'login', null);
   return jsonb_build_object('ok', true, 'token', t, 'id', u.id, 'nome', u.nome,
-                            'login', u.login, 'perfil', u.perfil, 'trocar_senha', u.trocar_senha);
+                            'login', u.login, 'perfil', u.perfil, 'trocar_senha', u.trocar_senha,
+                            'cadastro_ate', case when u.cadastro_ate > now() then u.cadastro_ate end);
 end $$;
 
 create or replace function public.logout(p_token text) returns void
@@ -341,7 +349,8 @@ declare u estoque.usuarios;
 begin
   u := estoque._sessao(p_token, true);
   return jsonb_build_object('id', u.id, 'nome', u.nome, 'login', u.login,
-                            'perfil', u.perfil, 'trocar_senha', u.trocar_senha);
+                            'perfil', u.perfil, 'trocar_senha', u.trocar_senha,
+                            'cadastro_ate', case when u.cadastro_ate > now() then u.cadastro_ate end);
 end $$;
 
 create or replace function public.trocar_senha(p_token text, p_senha_atual text, p_senha_nova text)
@@ -502,9 +511,19 @@ end $$;
 
 create or replace function public.salvar_produto(p_token text, p jsonb) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
-declare u estoque.usuarios; ant estoque.produtos; novo estoque.produtos; pid int; cb text; restr text;
+declare u estoque.usuarios; ant estoque.produtos; novo estoque.produtos; pid int; cb text; restr text; adm boolean;
 begin
-  u := estoque._admin(p_token);
+  u := estoque._sessao(p_token);
+  adm := u.perfil = 'admin';
+  if not estoque._pode_cadastrar(u) then
+    raise exception 'Cadastro de produtos não liberado para você. Peça ao administrador.';
+  end if;
+  if not adm and nullif(p ->> 'id','') is not null then
+    raise exception 'Somente o administrador pode alterar produtos já cadastrados.';
+  end if;
+  if not adm then
+    p := (p - 'sku') || jsonb_build_object('ativo', true);
+  end if;
   cb := regexp_replace(coalesce(p ->> 'codigo_barras',''), '\s', '', 'g');
   if cb = '' then cb := null; end if;
   if cb is not null and exists (select 1 from estoque.produtos where upper(sku) = upper(cb) and id is distinct from nullif(p ->> 'id','')::int) then
@@ -528,7 +547,7 @@ begin
     end if;
     insert into estoque.historico_precos (produto_id, custo_novo, preco_novo, usuario_id)
     values (novo.id, novo.custo, novo.preco, u.id);
-    perform estoque._audit(u.id, 'produto_criado', to_jsonb(novo));
+    perform estoque._audit(u.id, 'produto_criado', to_jsonb(novo) || jsonb_build_object('por_liberacao', not adm));
   else
     select * into ant from estoque.produtos where id = pid for update;
     if not found then raise exception 'Produto não encontrado.'; end if;
@@ -649,6 +668,7 @@ begin
   perform estoque._admin(p_token);
   return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nome', nome, 'login', login, 'perfil', perfil,
             'ativo', ativo, 'trocar_senha', trocar_senha, 'bloqueado', coalesce(bloqueado_ate > now(), false),
+            'cadastro_ate', case when cadastro_ate > now() then cadastro_ate end,
             'criado_em', criado_em) order by ativo desc, nome) from estoque.usuarios), '[]'::jsonb);
 end $$;
 
@@ -688,6 +708,46 @@ begin
   end if;
 exception when unique_violation then
   raise exception 'Já existe um usuário com este nome de acesso.';
+end $$;
+
+-- Grava o código de barras lido num produto (admin; ou operador liberado, só em produto sem código)
+create or replace function public.vincular_codigo(p_token text, p_produto int, p_codigo text) returns jsonb
+language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios; pr estoque.produtos; cb text;
+begin
+  u := estoque._sessao(p_token);
+  if not estoque._pode_cadastrar(u) then
+    raise exception 'Cadastro de códigos não liberado para você. Peça ao administrador.';
+  end if;
+  cb := regexp_replace(coalesce(p_codigo,''), '\s', '', 'g');
+  if cb = '' then raise exception 'Código vazio.'; end if;
+  select * into pr from estoque.produtos where id = p_produto for update;
+  if not found then raise exception 'Produto não encontrado.'; end if;
+  if pr.codigo_barras is not null and pr.codigo_barras <> cb and u.perfil <> 'admin' then
+    raise exception 'Este produto já tem outro código de barras. Somente o administrador pode trocar.';
+  end if;
+  if exists (select 1 from estoque.produtos where (codigo_barras = cb or upper(sku) = upper(cb)) and id <> pr.id) then
+    raise exception 'Este código já pertence a outro produto.';
+  end if;
+  update estoque.produtos set codigo_barras = cb where id = pr.id;
+  perform estoque._audit(u.id, 'codigo_vinculado', jsonb_build_object('produto', pr.sku, 'codigo', cb, 'anterior', pr.codigo_barras));
+  return jsonb_build_object('id', pr.id, 'sku', pr.sku, 'codigo_barras', cb);
+end $$;
+
+-- Libera (ou encerra, com p_ate nulo) o cadastro temporário de produtos para um operador
+create or replace function public.liberar_cadastro(p_token text, p_usuario int, p_ate timestamptz) returns void
+language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios; alvo estoque.usuarios;
+begin
+  u := estoque._admin(p_token);
+  select * into alvo from estoque.usuarios where id = p_usuario for update;
+  if not found then raise exception 'Usuário não encontrado.'; end if;
+  if alvo.perfil = 'admin' then raise exception 'O administrador já pode cadastrar produtos.'; end if;
+  if p_ate is not null and p_ate <= now() then raise exception 'Escolha uma data e hora no futuro.'; end if;
+  if p_ate is not null and p_ate > now() + interval '90 days' then raise exception 'A liberação pode ser de no máximo 90 dias.'; end if;
+  update estoque.usuarios set cadastro_ate = p_ate where id = p_usuario;
+  perform estoque._audit(u.id, case when p_ate is null then 'cadastro_encerrado' else 'cadastro_liberado' end,
+                         jsonb_build_object('usuario', alvo.login, 'ate', p_ate));
 end $$;
 
 create or replace function public.redefinir_senha(p_token text, p_usuario int, p_senha text) returns void
@@ -764,7 +824,7 @@ begin
       'solicitar_estorno(text,bigint,text)','salvar_produto(text,jsonb)','historico_precos(text,int)',
       'ajustar_inventario(text,int,int,text)','estornos(text,text)','decidir_estorno(text,int,boolean,text)',
       'estornar(text,bigint,text)','movimentacoes(text,date,date)','usuarios(text)','salvar_usuario(text,jsonb)',
-      'redefinir_senha(text,int,text)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
+      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
     loop
       execute format('revoke all on function public.%s from public', f);
       execute format('grant execute on function public.%s to anon, authenticated', f);

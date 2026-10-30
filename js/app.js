@@ -50,6 +50,9 @@ const parseNum = (v) => {
 const money2 = (n) => (n === null || n === undefined || n === '' ? '' : Number(n).toFixed(2).replace('.', ','));
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const isAdmin = () => S.user && S.user.perfil === 'admin';
+// admin, ou operador com liberação temporária para cadastrar produtos novos
+const liberadoAte = () => (S.user && S.user.perfil !== 'admin' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
+const podeCadastrar = () => isAdmin() || !!liberadoAte();
 const sum = (arr, f) => arr.reduce((a, x) => a + (Number(f(x)) || 0), 0);
 const groupBy = (arr, f) => arr.reduce((m, x) => { const k = f(x); (m[k] = m[k] || []).push(x); return m; }, {});
 const storage = {
@@ -280,10 +283,11 @@ const NAV_ADMIN = [
   ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Configurações'],
 ];
 const ROTAS = {};
+const navAtual = () => (isAdmin() ? NAV_ADMIN : podeCadastrar() ? [...NAV_OPER, ['produtos', 'Produtos']] : NAV_OPER);
 const rotaAtual = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || (isAdmin() ? 'painel' : 'saida'));
 
 function shell() {
-  const nav = isAdmin() ? NAV_ADMIN : NAV_OPER;
+  const nav = navAtual();
   const r = rotaAtual();
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
   const bottom = isAdmin() ? nav.slice(0, 4) : nav;
@@ -296,14 +300,27 @@ function shell() {
         <button class="btn sm" id="b-sair">${icon('sair')}Sair</button></div>
     </header>
     <div class="layout">
-      <nav class="sidenav" aria-label="Menu">${nav.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('')}</nav>
+      <nav class="sidenav" aria-label="Menu"></nav>
       <main class="content" id="content"></main>
     </div>
-    <nav class="bottomnav" aria-label="Menu">${bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}</a>`).join('')}
-      ${isAdmin() ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : ''}</nav>
+    <nav class="bottomnav" aria-label="Menu"></nav>
   </div>`;
+  desenharNav();
   document.getElementById('b-sair').onclick = () => sair();
   document.getElementById('b-senha').onclick = () => telaTrocarSenha(false);
+}
+
+// (re)desenha só os menus, sem mexer na tela aberta
+function desenharNav() {
+  const side = document.querySelector('.sidenav'), bot = document.querySelector('.bottomnav');
+  if (!side || !bot) return;
+  const nav = navAtual();
+  const r = rotaAtual();
+  const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
+  const bottom = isAdmin() ? nav.slice(0, 4) : nav;
+  side.innerHTML = nav.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
+  bot.innerHTML = bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}</a>`).join('')
+    + (isAdmin() ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : '');
   const mais = document.getElementById('b-mais');
   if (mais) mais.onclick = () => {
     const back = document.createElement('div'); back.className = 'drawer-back';
@@ -315,11 +332,34 @@ function shell() {
   };
 }
 
+// Operador: confere se a liberação de cadastro mudou (ao usar o app, ao voltar para ele e quando o prazo vence)
+let ultimaVerificacao = 0, timerPrazo = null;
+async function verificarLiberacao(forcar = false) {
+  if (!S.user || isAdmin() || S.user.trocar_senha) return;
+  if (!forcar && Date.now() - ultimaVerificacao < 60000) return;
+  ultimaVerificacao = Date.now();
+  const antes = podeCadastrar();
+  try { Object.assign(S.user, await rpc('sessao')); } catch { return; }
+  agendarFimPrazo();
+  if (antes === podeCadastrar()) return;
+  if (!navAtual().some(([k]) => k === rotaAtual())) { render(); return; }
+  desenharNav();
+  toast(podeCadastrar() ? 'Cadastro de produtos liberado para você (menu Produtos).' : 'A liberação de cadastro de produtos terminou.', podeCadastrar() ? 'ok' : '');
+}
+function agendarFimPrazo() {
+  clearTimeout(timerPrazo);
+  const ate = liberadoAte();
+  if (ate) timerPrazo = setTimeout(() => verificarLiberacao(true), Math.min(ate - Date.now() + 1500, 2 ** 31 - 1));
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarLiberacao(true); });
+['click', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => verificarLiberacao(), { passive: true }));
+
 async function render() {
   if (!S.user) return telaLogin();
   if (S.user.trocar_senha) return telaTrocarSenha(true);
   const r = rotaAtual();
-  const permitido = (isAdmin() ? NAV_ADMIN : NAV_OPER).some(([k]) => k === r);
+  if (!isAdmin()) { try { Object.assign(S.user, await rpc('sessao')); ultimaVerificacao = Date.now(); agendarFimPrazo(); } catch (e) { if (!S.user) return; } }
+  const permitido = navAtual().some(([k]) => k === r);
   if (!permitido) { location.hash = '#/' + (isAdmin() ? 'painel' : 'saida'); return; }
   shell();
   const el = document.getElementById('content');
@@ -461,7 +501,7 @@ window.addEventListener('hashchange', () => { aoLerCodigo = null; });
 
 // Código lido que não está cadastrado
 function codigoNaoCadastrado(cod, aoVincular) {
-  if (!isAdmin()) {
+  if (!podeCadastrar()) {
     modal('Código não cadastrado', `<p class="leitor-dica">O código <b class="codigo-grande">${esc(cod)}</b> não está cadastrado em nenhum produto.</p>
       <p>Peça ao administrador para cadastrar este código, ou procure o produto pelo nome.</p>
       <div class="btn-row end"><button class="btn primary" data-x>Entendi</button></div>`);
@@ -476,8 +516,9 @@ function codigoNaoCadastrado(cod, aoVincular) {
       const pk = seletorProduto(b.querySelector('#vinc-pk'), { semLeitor: true, onChange: (p) => { okBtn.disabled = !p; } });
       okBtn.onclick = async () => {
         const p = pk.get(); if (!p) return;
+        if (p.codigo_barras && !isAdmin()) { toast('Este produto já tem outro código de barras. Somente o administrador pode trocar.', 'err'); return; }
         if (p.codigo_barras && !(await confirmar('Trocar código', `Este produto já tem o código ${esc(p.codigo_barras)}. Trocar por ${esc(cod)}?`, { ok: 'Trocar' }))) return;
-        const r = await tentar(() => rpc('salvar_produto', { p: { ...p, codigo_barras: cod } }), okBtn);
+        const r = await tentar(() => rpc('vincular_codigo', { p_produto: p.id, p_codigo: cod }), okBtn);
         if (!r) return;
         toast('Código gravado no produto.', 'ok'); close();
         await recarregarProdutos();
@@ -542,7 +583,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
         return `<button type="button" class="pick-item" data-id="${p.id}" ${sem ? 'disabled' : ''}>
           <div class="main"><div>${esc(p.nome)}</div><div class="sku">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''}</div></div>
           <span class="badge ${p.saldo <= 0 ? 'out' : p.saldo <= p.estoque_minimo ? 'warn' : 'in'}">${nf(p.saldo)} un.</span></button>`;
-      }).join('') : `<div class="empty" style="border:0">${S.produtos.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado ainda.' + (isAdmin() ? ' Cadastre em <a href="#/produtos">Produtos</a>.' : ' Peça ao administrador para cadastrar.')}</div>`;
+      }).join('') : `<div class="empty" style="border:0">${S.produtos.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado ainda.' + (podeCadastrar() ? ' Cadastre em <a href="#/produtos">Produtos</a>.' : ' Peça ao administrador para cadastrar.')}</div>`;
     };
     inp.oninput = filtrar;
     res.onclick = (e) => {
@@ -948,25 +989,28 @@ ROTAS.painel = async (el) => {
    ========================================================= */
 ROTAS.produtos = async (el) => {
   await recarregarProdutos();
+  const adm = isAdmin();
+  const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
+    ${adm ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
     <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
-    <label class="check"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
-    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th><th class="num">Custo</th><th class="num">Venda</th><th class="num">Margem</th><th class="num">Mín.</th><th class="num">Saldo</th><th></th></tr></thead><tbody id="pr-body"></tbody></table></div>`;
+    <label class="check ${adm ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
+    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${adm ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
   const q = el.querySelector('#pr-q'), inat = el.querySelector('#pr-inat');
   const desenhar = () => {
     const termos = norm(q.value).split(/\s+/).filter(Boolean);
     const lista = S.produtos.filter((p) => inat.checked || p.ativo).filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.fornecedor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
     el.querySelector('#pr-body').innerHTML = lista.length ? lista.map((p) => `<tr class="${p.ativo ? '' : 'estornado'}">
       <td class="nowrap">${esc(p.sku)}${p.codigo_barras ? `<div class="small muted">${esc(p.codigo_barras)}</div>` : ''}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
-      <td class="num">${brl(p.custo)}</td><td class="num">${brl(p.preco)}</td><td class="num">${pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>
+      ${adm ? `<td class="num">${brl(p.custo)}</td>` : ''}<td class="num">${brl(p.preco)}</td>${adm ? `<td class="num">${pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>` : ''}
       <td class="num">${nf(p.estoque_minimo)}</td><td class="num"><b>${nf(p.saldo)}</b></td>
-      <td><button class="btn sm" data-ed="${p.id}">Editar</button></td></tr>`).join('') : '<tr><td colspan="8" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>';
+      ${adm ? `<td><button class="btn sm" data-ed="${p.id}">Editar</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${adm ? 8 : 5}" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>`;
   };
   [q, inat].forEach((x) => x.addEventListener('input', desenhar));
   el.querySelector('#pr-novo').onclick = () => formProduto(null, desenhar);
   const abrirCodigo = (cod) => {
     const p = produtoPorCodigo(cod);
-    if (p) { inat.checked = inat.checked || !p.ativo; q.value = p.sku; desenhar(); formProduto(p, desenhar); return; }
+    if (p) { inat.checked = inat.checked || !p.ativo; q.value = p.sku; desenhar(); if (adm) formProduto(p, desenhar); return; }
     codigoNaoCadastrado(limpaCodigo(cod), () => desenhar());
   };
   aoLerCodigo = abrirCodigo;
@@ -993,7 +1037,7 @@ function formProduto(p, depois, inicial = {}) {
       <div class="field"><label for="p-forn">Fornecedor</label><input id="p-forn" type="text" list="dl-pforn" value="${esc(p.fornecedor)}">${datalist('dl-pforn', L.fornecedor)}</div>
     </div>
     <div class="grid3">
-      <div class="field"><label for="p-custo">Custo (R$)</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
+      <div class="field"><label for="p-custo">Custo (R$)${isAdmin() ? '' : ' <span class="muted">(se souber)</span>'}</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
       <div class="field"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
       <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"></div>
     </div>
@@ -1001,7 +1045,7 @@ function formProduto(p, depois, inicial = {}) {
     <div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
       <div class="busca-linha"><input id="p-cb" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(p.codigo_barras)}" placeholder="Leia com a câmera ou o leitor de mão">${botaoCamera('data-cbcam')}</div>
       <span class="hint">${novo ? 'Se marcar vários tamanhos, deixe vazio e grave o código de cada tamanho depois (cada tamanho tem um código diferente).' : 'Cada tamanho/cor tem o seu próprio código de barras.'}</span></div>
-    <div class="grid2">
+    <div class="grid2 ${isAdmin() ? '' : 'hidden'}">
       <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
       <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
     </div>
@@ -1378,12 +1422,24 @@ ROTAS.usuarios = async (el) => {
       <div class="title">${esc(u.nome)} <span class="badge ${u.perfil === 'admin' ? 'acc' : ''}">${u.perfil === 'admin' ? 'Administrador' : 'Operador'}</span>
         ${u.ativo ? '' : '<span class="badge">desativado</span>'} ${u.bloqueado ? '<span class="badge out">bloqueado</span>' : ''} ${u.trocar_senha ? '<span class="badge warn">troca de senha pendente</span>' : ''}</div>
       <div class="meta">Usuário: <b>${esc(u.login)}</b> · desde ${dOnly(u.criado_em)}</div>
-      <div class="row-actions"><button class="btn sm" data-ed="${u.id}">Editar</button><button class="btn sm" data-pw="${u.id}">Redefinir senha</button></div>
+      ${u.cadastro_ate ? `<div class="liberado">Cadastro de produtos liberado até <b>${esc(dt(u.cadastro_ate))}</b></div>` : ''}
+      <div class="row-actions"><button class="btn sm" data-ed="${u.id}">Editar</button><button class="btn sm" data-pw="${u.id}">Redefinir senha</button>
+        ${u.perfil === 'operador' && u.ativo ? (u.cadastro_ate
+          ? `<button class="btn sm" data-lib="${u.id}">Mudar prazo</button><button class="btn sm danger" data-fim="${u.id}">Encerrar liberação</button>`
+          : `<button class="btn sm" data-lib="${u.id}">${icon('produtos')}Liberar cadastro</button>`) : ''}</div>
     </div></div>`).join('')}</div>`;
   el.querySelector('#us-novo').onclick = () => formUsuario(null, () => render());
   el.querySelector('.list').onclick = (e) => {
     const ed = e.target.closest('[data-ed]'), pw = e.target.closest('[data-pw]');
+    const lib = e.target.closest('[data-lib]'), fim = e.target.closest('[data-fim]');
     if (ed) formUsuario(us.find((u) => u.id === Number(ed.dataset.ed)), () => render());
+    if (lib) liberarCadastro(us.find((u) => u.id === Number(lib.dataset.lib)));
+    if (fim) {
+      const u = us.find((x) => x.id === Number(fim.dataset.fim));
+      confirmar('Encerrar liberação', `${esc(u.nome)} vai deixar de poder cadastrar produtos agora.`, { ok: 'Encerrar', kind: 'out' }).then(async (ok) => {
+        if (ok && await tentar(async () => { await rpc('liberar_cadastro', { p_usuario: u.id, p_ate: null }); return true; })) { toast('Liberação encerrada.', 'ok'); render(); }
+      });
+    }
     if (pw) {
       const u = us.find((x) => x.id === Number(pw.dataset.pw));
       modal('Redefinir senha', `<form id="f-pw"><p>Nova senha provisória para <b>${esc(u.nome)}</b>. No próximo acesso a pessoa será obrigada a criar a própria senha.</p>
@@ -1399,6 +1455,47 @@ ROTAS.usuarios = async (el) => {
     }
   };
 };
+
+function liberarCadastro(u) {
+  const agora = new Date();
+  const fimDoDia = new Date(agora); fimDoDia.setHours(23, 59, 0, 0);
+  const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const opcoes = [
+    ['hoje', 'Até o fim de hoje', fimDoDia],
+    ['24h', 'Por 24 horas', new Date(agora.getTime() + 24 * 3600e3)],
+    ['7d', 'Por 7 dias', new Date(agora.getTime() + 7 * 24 * 3600e3)],
+    ['outro', 'Escolher data e hora', null],
+  ];
+  modal('Liberar cadastro de produtos', `<form id="f-lib">
+    <p><b>${esc(u.nome)}</b> poderá <b>cadastrar produtos novos</b> (e gravar o código de barras de produtos que ainda não têm), além das entradas e saídas de sempre.</p>
+    <p class="muted">Não poderá alterar produtos existentes, preços, nem ver custos, relatórios, painel ou usuários. A liberação termina sozinha no prazo escolhido.</p>
+    <div class="field"><span class="label">Por quanto tempo?</span><div class="pills">${opcoes.map(([k, t], i) => `<label class="pill"><input type="radio" name="prazo" value="${k}" ${i === 0 ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
+    <div class="field hidden" id="lib-outro"><label for="lib-ate">Liberado até</label><input id="lib-ate" type="datetime-local" min="${local(agora)}" value="${local(new Date(agora.getTime() + 3 * 24 * 3600e3))}"></div>
+    <p class="muted" id="lib-resumo"></p>
+    <div class="btn-row end"><button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Liberar</button></div></form>`, {
+    onMount(b, close) {
+      const f = b.querySelector('#f-lib');
+      const escolhido = () => {
+        const k = f.querySelector('input[name=prazo]:checked').value;
+        if (k === 'outro') { const v = f.querySelector('#lib-ate').value; return v ? new Date(v) : null; }
+        return opcoes.find((o) => o[0] === k)[2];
+      };
+      const atualizar = () => {
+        f.querySelector('#lib-outro').classList.toggle('hidden', f.querySelector('input[name=prazo]:checked').value !== 'outro');
+        const d = escolhido(); f.querySelector('#lib-resumo').innerHTML = d && !isNaN(d) ? `Termina em <b>${esc(dt(d.toISOString()))}</b>.` : '';
+      };
+      f.addEventListener('input', atualizar); atualizar();
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const d = escolhido();
+        if (!d || isNaN(d)) return toast('Escolha a data e hora.', 'err');
+        if (await tentar(async () => { await rpc('liberar_cadastro', { p_usuario: u.id, p_ate: d.toISOString() }); return true; }, e.submitter)) {
+          toast(`Cadastro liberado para ${u.nome}.`, 'ok'); close(); render();
+        }
+      };
+    },
+  });
+}
 
 function formUsuario(u, depois) {
   const novo = !u; u = u || { perfil: 'operador', ativo: true };
@@ -1431,6 +1528,7 @@ const ACOES = {
   entrada: 'Registrou entrada', saida: 'Registrou saída', estorno_solicitado: 'Pediu estorno', estorno_aprovado: 'Aprovou estorno',
   estorno_recusado: 'Recusou estorno', estorno_direto: 'Estornou lançamento', produto_criado: 'Cadastrou produto', produto_alterado: 'Alterou produto',
   ajuste_inventario: 'Ajuste de inventário', usuario_criado: 'Criou usuário', usuario_alterado: 'Alterou usuário', senha_redefinida: 'Redefiniu senha',
+  cadastro_liberado: 'Liberou cadastro de produtos', cadastro_encerrado: 'Encerrou liberação de cadastro', codigo_vinculado: 'Gravou código de barras',
   lista_alterada: 'Alterou lista', backup_exportado: 'Exportou backup',
 };
 function resumoDetalhe(a) {
