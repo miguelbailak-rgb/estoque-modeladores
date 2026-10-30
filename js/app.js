@@ -1056,7 +1056,7 @@ function formProduto(p, depois, inicial = {}) {
     <div class="grid3">
       <div class="field"><label for="p-custo">Custo (R$)${isAdmin() ? '' : ' <span class="muted">(se souber)</span>'}</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
       <div class="field"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
-      <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"></div>
+      <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"><span class="hint">Quando o estoque chegar a esse número, aparece o aviso <b>repor</b>. Use 0 para não avisar.</span></div>
     </div>
     <p class="muted small" id="p-margem"></p>
     <div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
