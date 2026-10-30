@@ -799,7 +799,8 @@ ROTAS.entrada = async (el) => {
 ROTAS.estoque = async (el) => {
   await recarregarProdutos();
   const tipos = [...new Set(S.produtos.map((p) => p.tipo))].sort();
-  el.innerHTML = `<div class="page-head"><h1>Estoque</h1>${isAdmin() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
+  const nRepor = S.produtos.filter(precisaRepor).length;
+  el.innerHTML = `<div class="page-head"><h1>Estoque</h1><button class="btn ${nRepor ? 'out' : ''}" id="es-repor">Lista de reposição${nRepor ? ` <span class="badge count" style="background:#fff;color:var(--out)">${nRepor}</span>` : ''}</button>${isAdmin() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
     <div class="toolbar">
       <div class="field grow"><label for="es-q">Buscar</label><div class="busca-linha"><input id="es-q" type="search" placeholder="Nome, tamanho, código…" enterkeyhint="search">${botaoCamera()}</div></div>
       <div class="field"><label for="es-tipo">Tipo</label><select id="es-tipo">${optionsHtml(tipos, '', 'Todos')}</select></div>
@@ -826,6 +827,7 @@ ROTAS.estoque = async (el) => {
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
   [q, tipo, low].forEach((x) => x.addEventListener('input', desenhar));
+  el.querySelector('#es-repor').onclick = () => tentar(listaReposicao);
   const mostrarCodigo = (cod) => {
     const p = produtoPorCodigo(cod);
     if (!p) { codigoNaoCadastrado(limpaCodigo(cod), (np) => { if (np) { q.value = np.sku; desenhar(); } }); return; }
@@ -860,6 +862,81 @@ function ajusteInventario(p, depois) {
         if (!ok) return;
         toast('Ajuste registrado.', 'ok'); close(); await recarregarProdutos(); depois && depois();
       };
+    },
+  });
+}
+
+/* =========================================================
+   LISTA DE REPOSIÇÃO (itens que chegaram no estoque mínimo)
+   ========================================================= */
+const precisaRepor = (p) => p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo;
+const sugestaoCompra = (p) => Math.max(p.estoque_minimo * 2 - Math.max(p.saldo, 0), 1);
+
+async function listaReposicao() {
+  await recarregarProdutos();
+  const itens = S.produtos.filter(precisaRepor);
+  if (!itens.length) {
+    modal('Lista de reposição', `<p class="leitor-dica">Nenhum produto chegou no estoque mínimo. Não há nada para repor agora.</p>
+      <p class="muted">O aviso aparece quando a quantidade fica igual ou menor que o <b>Estoque mínimo</b> cadastrado no produto.</p>
+      <div class="btn-row end"><button class="btn primary" data-x>Fechar</button></div>`);
+    return;
+  }
+  const comprar = {}; itens.forEach((p) => { comprar[p.id] = sugestaoCompra(p); });
+  const grupos = Object.entries(groupBy(itens, (p) => p.fornecedor || 'Sem fornecedor')).sort((a, b) => (a[0] === 'Sem fornecedor') - (b[0] === 'Sem fornecedor') || a[0].localeCompare(b[0]));
+  const hoje = dOnly(new Date().toISOString());
+  const custoTotal = () => sum(itens, (p) => (comprar[p.id] || 0) * (p.custo || 0));
+
+  const texto = () => {
+    const linhas = [`*Lista de reposição* — ${CFG.CLINICA || ''}`, hoje, ''];
+    grupos.forEach(([forn, ps]) => {
+      const pedir = ps.filter((p) => comprar[p.id] > 0);
+      if (!pedir.length) return;
+      linhas.push(`*${forn}*`);
+      pedir.forEach((p) => linhas.push(`• ${p.nome} — ${nf(comprar[p.id])} ${unidade(p, comprar[p.id])} (tem ${nf(Math.max(p.saldo, 0))}, mín. ${nf(p.estoque_minimo)})`));
+      linhas.push('');
+    });
+    return linhas.join('\n').trim();
+  };
+
+  modal('Lista de reposição', `<div class="repor">
+    <p class="print-only"><b>${esc(CFG.CLINICA || '')}</b> — Lista de reposição — ${esc(hoje)}</p>
+    <p class="leitor-dica no-print"><b>${nf(itens.length)}</b> produto(s) chegaram no mínimo. Confira a quantidade a comprar (já vem uma sugestão) e envie ou imprima.</p>
+    ${grupos.map(([forn, ps]) => `<h3 class="repor-forn">${esc(forn)}</h3>
+      <div class="list">${ps.map((p) => `<div class="row-item repor-item"><div class="main">
+          <div class="title">${esc(p.nome)}</div>
+          <div class="meta">Tem <b style="color:var(--out)">${nf(Math.max(p.saldo, 0))}</b> · mínimo ${nf(p.estoque_minimo)}${p.marca ? ' · ' + esc(p.marca) : ''} · ${esc(p.sku)}</div></div>
+        <div class="side"><label class="small muted" for="rp-${p.id}">Comprar</label>
+          <input id="rp-${p.id}" class="repor-qtd" data-rp="${p.id}" type="number" inputmode="numeric" min="0" value="${comprar[p.id]}">
+          <div class="small muted">${ehPorPar(p.tipo) ? 'pares' : 'unidades'}</div></div></div>`).join('')}</div>`).join('')}
+    ${isAdmin() ? '<div class="total-line"><span>Custo estimado da compra</span><span class="v" id="rp-custo"></span></div>' : ''}
+    <p class="muted small no-print">Sugestão = o suficiente para chegar ao dobro do estoque mínimo. Mude à vontade; 0 tira o item da lista.</p>
+    <div class="btn-row no-print" style="margin-top:10px">
+      <button class="btn primary" id="rp-enviar">${navigator.share ? 'Enviar (WhatsApp, e-mail…)' : 'Enviar pelo WhatsApp'}</button>
+      <button class="btn" id="rp-copiar">Copiar texto</button>
+      <button class="btn" id="rp-imprimir">Imprimir</button>
+      ${isAdmin() ? '<button class="btn" id="rp-excel">Baixar Excel</button>' : ''}
+    </div></div>`, {
+    wide: true,
+    onMount(b) {
+      const atual = () => { const c = b.querySelector('#rp-custo'); if (c) c.textContent = brl(custoTotal()); };
+      b.addEventListener('input', (e) => { const i = e.target.closest('[data-rp]'); if (!i) return; comprar[Number(i.dataset.rp)] = Math.max(0, parseInt(i.value, 10) || 0); atual(); });
+      atual();
+      b.querySelector('#rp-enviar').onclick = async () => {
+        const t = texto();
+        if (navigator.share) { try { await navigator.share({ title: 'Lista de reposição', text: t }); } catch { /* cancelado */ } return; }
+        window.open('https://wa.me/?text=' + encodeURIComponent(t), '_blank', 'noopener');
+      };
+      b.querySelector('#rp-copiar').onclick = async () => {
+        const t = texto();
+        try { await navigator.clipboard.writeText(t); toast('Lista copiada. Cole no WhatsApp ou no e-mail.', 'ok'); }
+        catch { modal('Copiar lista', `<p>Selecione o texto e copie:</p><textarea style="min-height:300px">${esc(t)}</textarea>`); }
+      };
+      b.querySelector('#rp-imprimir').onclick = () => { document.body.classList.add('imprimir-modal'); window.print(); setTimeout(() => document.body.classList.remove('imprimir-modal'), 500); };
+      const x = b.querySelector('#rp-excel');
+      if (x) x.onclick = () => exportarCSV({ titulo: 'Lista de reposição', periodo: hoje, secoes: [{
+        cols: [C('Fornecedor', 'forn'), C('Código', 'sku'), C('Produto', 'nome'), C('Tem', 'saldo', 'int'), C('Mínimo', 'minimo', 'int'), C('Comprar', 'qtd', 'int'), C('Unidade', 'un'), C('Custo un.', 'custo', 'brl'), C('Custo total', 'total', 'brl')],
+        rows: itens.filter((p) => comprar[p.id] > 0).map((p) => ({ forn: p.fornecedor || 'Sem fornecedor', sku: p.sku, nome: p.nome, saldo: Math.max(p.saldo, 0), minimo: p.estoque_minimo, qtd: comprar[p.id], un: ehPorPar(p.tipo) ? 'par' : 'unidade', custo: p.custo, total: comprar[p.id] * p.custo })),
+        totais: ['qtd', 'total'] }] });
     },
   });
 }
@@ -977,10 +1054,11 @@ ROTAS.painel = async (el) => {
       <div class="card"><h2>Faturamento e lucro — últimos 6 meses</h2><div class="chart-box"><canvas id="g-meses"></canvas></div></div>
       <div class="card"><h2>Mais vendidos no mês</h2><div class="chart-box"><canvas id="g-top"></canvas></div></div>
     </div>
-    <div class="card"><h2>Para repor</h2>${baixos.length ? `<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Saldo</th><th class="num">Mínimo</th></tr></thead><tbody>
+    <div class="card"><div class="page-head" style="margin-bottom:8px"><h2 style="margin:0;flex:1">Para repor</h2>${baixos.length ? '<button class="btn out sm" id="pn-repor">Criar lista de reposição</button>' : ''}</div>${baixos.length ? `<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Saldo</th><th class="num">Mínimo</th></tr></thead><tbody>
       ${baixos.slice(0, 15).map((p) => `<tr><td>${esc(p.nome)}<div class="small muted">${esc(p.sku)}</div></td><td class="num"><b style="color:var(--out)">${nf(p.saldo)}</b></td><td class="num">${nf(p.estoque_minimo)}</td></tr>`).join('')}
       </tbody></table></div>${baixos.length > 15 ? `<p class="muted small" style="margin-top:8px">E mais ${baixos.length - 15}. Veja o relatório de reposição.</p>` : ''}` : '<p class="muted">Nenhum item abaixo do mínimo. </p>'}</div>`;
 
+  const bRepor = el.querySelector('#pn-repor'); if (bRepor) bRepor.onclick = () => tentar(listaReposicao);
   // gráfico por mês
   const meses = []; for (let i = 5; i >= 0; i--) meses.push(isoShift(inicioMes(hoje), { m: -i }).slice(0, 7));
   const porMes = groupBy((movs || []).filter(ehVenda), (m) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(m.data)).slice(0, 7));

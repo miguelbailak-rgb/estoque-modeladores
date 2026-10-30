@@ -292,6 +292,15 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
 .empty { text-align: center; padding: 36px 16px; color: var(--ink-3); border: 1.5px dashed var(--line-2); border-radius: var(--radius); }
 .print-only { display: none; }
 
+/* ---------- Lista de reposição ---------- */
+.repor-forn { margin: 18px 0 8px; font-size: 1.1rem; }
+.repor-item .side { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.repor-qtd { width: 90px !important; min-height: 52px; text-align: center; font-size: 1.3rem !important; font-weight: 700; }
+@media print {
+  body.imprimir-modal .repor .row-item { border: 0; border-bottom: 1px solid #bbb; border-radius: 0; padding: 6px 0; }
+  body.imprimir-modal .repor-qtd { border: 0; font-size: 12pt !important; }
+}
+
 /* ---------- Dica por tipo de produto ---------- */
 .dica-tipo { font-size: 1rem; margin-top: -4px; }
 .qtd-par { font-weight: 500; color: var(--warn); }
