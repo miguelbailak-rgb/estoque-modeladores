@@ -292,6 +292,10 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
 .empty { text-align: center; padding: 36px 16px; color: var(--ink-3); border: 1.5px dashed var(--line-2); border-radius: var(--radius); }
 .print-only { display: none; }
 
+/* ---------- Dica por tipo de produto ---------- */
+.dica-tipo { font-size: 1rem; margin-top: -4px; }
+.qtd-par { font-weight: 500; color: var(--warn); }
+
 /* ---------- Liberação de cadastro ---------- */
 .liberado { display: inline-block; margin-top: 6px; padding: 6px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: .92rem; }
 

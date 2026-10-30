@@ -53,6 +53,18 @@ const isAdmin = () => S.user && S.user.perfil === 'admin';
 // admin, ou operador com liberação temporária para cadastrar produtos novos
 const liberadoAte = () => (S.user && S.user.perfil !== 'admin' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
 const podeCadastrar = () => isAdmin() || !!liberadoAte();
+// Orientações por tipo de produto (aparecem no cadastro e nas telas de entrada/saída)
+const ehPorPar = (tipo) => /lateral|flanco/i.test(tipo || '') && /placa/i.test(tipo || '');
+const unidade = (p, n) => (p && ehPorPar(p.tipo) ? (n === 1 ? 'par' : 'pares') : (n === 1 ? 'unidade' : 'unidades'));
+const unid = (p) => (p && ehPorPar(p.tipo) ? 'par(es)' : 'un.');
+function dicaTipo(tipo) {
+  const t = String(tipo || '');
+  if (/^meia/i.test(t)) return { modelo: 'Ex.: Meia coxa antitrombo', dica: 'A clínica usa um modelo de meia: Meia coxa antitrombo. Para um tamanho novo, repita o mesmo Modelo e marque o tamanho.' };
+  if (ehPorPar(t)) return { modelo: 'Ex.: Rígida reta 26 x 10 cm  ou  Flexível 26 x 10 cm', dica: 'Placa lateral vem em PAR: o estoque conta pares (1 = 1 par). No Modelo, escreva se é rígida ou flexível e a medida.', unico: true };
+  if (/^placa/i.test(t)) return { modelo: 'Ex.: Coração rígida 35 x 28 cm  ou  Flexível oval', dica: 'No Modelo, escreva se a placa é rígida ou flexível e a medida. Tamanho: Único.', unico: true };
+  if (/^espuma/i.test(t)) return { modelo: 'Ex.: Espuma abdominal 30 x 40 cm', dica: 'No Modelo, escreva a região e a medida. Tamanho: Único.', unico: true };
+  return { modelo: 'Ex.: Abdominal 3 fechos', dica: '' };
+}
 const sum = (arr, f) => arr.reduce((a, x) => a + (Number(f(x)) || 0), 0);
 const groupBy = (arr, f) => arr.reduce((m, x) => { const k = f(x); (m[k] = m[k] || []).push(x); return m; }, {});
 const storage = {
@@ -551,7 +563,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
     if (escolhido) {
       const p = escolhido;
       container.innerHTML = `<div class="picked"><div class="main"><div class="title">${esc(p.nome)}</div>
-        <div class="meta small muted">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · Em estoque: <b>${nf(p.saldo)}</b></div></div>
+        <div class="meta small muted">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · Em estoque: <b>${nf(p.saldo)} ${unidade(p, p.saldo)}</b></div></div>
         <button type="button" class="btn sm" data-trocar>Trocar</button></div>`;
       container.querySelector('[data-trocar]').onclick = () => { escolhido = null; desenhar(); onChange && onChange(null); container.querySelector('input').focus(); };
       return;
@@ -582,7 +594,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
         const sem = exigeSaldo && p.saldo <= 0;
         return `<button type="button" class="pick-item" data-id="${p.id}" ${sem ? 'disabled' : ''}>
           <div class="main"><div>${esc(p.nome)}</div><div class="sku">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''}</div></div>
-          <span class="badge ${p.saldo <= 0 ? 'out' : p.saldo <= p.estoque_minimo ? 'warn' : 'in'}">${nf(p.saldo)} un.</span></button>`;
+          <span class="badge ${p.saldo <= 0 ? 'out' : p.saldo <= p.estoque_minimo ? 'warn' : 'in'}">${nf(p.saldo)} ${unid(p)}</span></button>`;
       }).join('') : `<div class="empty" style="border:0">${S.produtos.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado ainda.' + (podeCadastrar() ? ' Cadastre em <a href="#/produtos">Produtos</a>.' : ' Peça ao administrador para cadastrar.')}</div>`;
     };
     inp.oninput = filtrar;
@@ -627,7 +639,7 @@ function comprovante(m) {
   const qtd = Math.abs(m.qtd);
   const linhas = [
     ['Data', dt(m.data)], ['Lançamento', '#' + m.id], ['Tipo', saida ? 'Saída' : m.tipo === 'entrada' ? 'Entrada' : m.tipo], ['Motivo', m.motivo],
-    ['Produto', m.produto], ['Código', m.sku], ['Quantidade', nf(qtd)],
+    ['Produto', m.produto], ['Código', m.sku], ['Quantidade', nf(qtd) + ' ' + unidade({ tipo: m.tipo_produto }, qtd)],
   ];
   if (saida) {
     if (m.paciente_nome) linhas.push(['Paciente', m.paciente_nome]);
@@ -662,7 +674,7 @@ ROTAS.saida = async (el) => {
   el.innerHTML = `<div class="page-head"><h1>Registrar saída</h1></div>
   <form class="card" id="f-saida" novalidate>
     <div class="field"><span class="label">1. Produto</span><div id="pk"></div></div>
-    <div class="field"><label for="sd-qtd">2. Quantidade</label>${stepperHtml('sd-qtd')}</div>
+    <div class="field"><label for="sd-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('sd-qtd')}</div>
     <div class="field"><span class="label">3. Motivo</span>${pillsHtml('motivo', MOTIVOS_SAIDA, 'out')}</div>
     <div id="sd-pac" class="hidden">
       <div class="field"><label for="sd-nome">Nome da paciente</label><input id="sd-nome" type="text" autocomplete="off" autocapitalize="words"></div>
@@ -681,7 +693,7 @@ ROTAS.saida = async (el) => {
     <button class="btn out block big" type="submit">Registrar saída</button>
   </form>`;
   const f = el.querySelector('#f-saida');
-  const pk = seletorProduto(f.querySelector('#pk'), { exigeSaldo: true, onChange: () => { preencherValor(); calc(); } });
+  const pk = seletorProduto(f.querySelector('#pk'), { exigeSaldo: true, onChange: (p) => { f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo))); preencherValor(); calc(); } });
   bindStepper(f);
   const motivo = () => (f.querySelector('input[name=motivo]:checked') || {}).value;
   const vu = f.querySelector('#sd-vu'), desc = f.querySelector('#sd-desc'), qtd = f.querySelector('#sd-qtd'), pag = f.querySelector('#sd-pag');
@@ -709,7 +721,7 @@ ROTAS.saida = async (el) => {
     const p = pk.get(); const m = motivo(); const q = parseInt(qtd.value, 10);
     if (!p) return toast('Escolha o produto.', 'err');
     if (!q || q < 1) return toast('Informe a quantidade.', 'err');
-    if (q > p.saldo) return toast(`Só há ${p.saldo} unidade(s) em estoque.`, 'err');
+    if (q > p.saldo) return toast(`Só há ${p.saldo} ${unidade(p, p.saldo)} em estoque.`, 'err');
     if (!m) return toast('Escolha o motivo da saída.', 'err');
     const nome = f.querySelector('#sd-nome').value.trim();
     if (MOTIVOS_PACIENTE.includes(m) && !nome) return toast('Informe o nome da paciente.', 'err');
@@ -737,7 +749,7 @@ ROTAS.entrada = async (el) => {
   el.innerHTML = `<div class="page-head"><h1>Registrar entrada</h1></div>
   <form class="card" id="f-ent" novalidate>
     <div class="field"><span class="label">1. Produto</span><div id="pk"></div></div>
-    <div class="field"><label for="en-qtd">2. Quantidade</label>${stepperHtml('en-qtd')}</div>
+    <div class="field"><label for="en-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('en-qtd')}</div>
     <div class="field"><span class="label">3. Motivo</span>${pillsHtml('motivo', MOTIVOS_ENTRADA, 'in')}</div>
     <div class="grid2">
       <div class="field"><label for="en-custo">Custo unitário (R$)</label><input id="en-custo" type="text" inputmode="decimal" placeholder="${isAdmin() ? '' : 'Deixe vazio para usar o custo cadastrado'}"></div>
@@ -754,6 +766,7 @@ ROTAS.entrada = async (el) => {
   const custo = f.querySelector('#en-custo'), forn = f.querySelector('#en-forn'), qtd = f.querySelector('#en-qtd');
   const calc = () => { const t = f.querySelector('#en-total'); if (t) t.textContent = brl((parseNum(custo.value) || 0) * (parseInt(qtd.value, 10) || 0)); };
   const pk = seletorProduto(f.querySelector('#pk'), { onChange: (p) => {
+    f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo)));
     if (p && isAdmin() && p.custo !== undefined) custo.value = money2(p.custo);
     if (p && !forn.value) forn.value = p.fornecedor || '';
     calc();
@@ -809,7 +822,7 @@ ROTAS.estoque = async (el) => {
         <div class="title">${esc(p.nome)} ${p.ativo ? '' : '<span class="badge">inativo</span>'} ${baixo && p.ativo ? '<span class="badge out">repor</span>' : ''}</div>
         <div class="meta">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · mínimo ${nf(p.estoque_minimo)} · venda ${brl(p.preco)}${isAdmin() ? ' · custo ' + brl(p.custo) : ''}</div>
         ${isAdmin() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
-      </div><div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(p.saldo)}</div><div class="small muted">unid.</div></div></div>`;
+      </div><div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(p.saldo)}</div><div class="small muted">${unidade(p, p.saldo)}</div></div></div>`;
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
   [q, tipo, low].forEach((x) => x.addEventListener('input', desenhar));
@@ -989,6 +1002,7 @@ ROTAS.painel = async (el) => {
    ========================================================= */
 ROTAS.produtos = async (el) => {
   await recarregarProdutos();
+  S.listas = (await rpc('listas')) || S.listas;
   const adm = isAdmin();
   const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
@@ -1026,7 +1040,10 @@ function formProduto(p, depois, inicial = {}) {
   modal(novo ? 'Novo produto' : 'Editar produto', `<form id="f-prod" novalidate>
     <div class="grid2">
       <div class="field"><label for="p-tipo">Tipo</label><select id="p-tipo" required>${optionsHtml(L.tipo, p.tipo, 'Selecione')}</select></div>
-      <div class="field"><label for="p-modelo">Modelo</label><input id="p-modelo" type="text" value="${esc(p.modelo)}" placeholder="Ex.: Abdominal 3 fechos" required></div>
+      <div class="field"><label for="p-modelo">Modelo</label><input id="p-modelo" type="text" value="${esc(p.modelo)}" placeholder="${esc(dicaTipo(p.tipo).modelo)}" required></div>
+    </div>
+    <div class="info-box dica-tipo ${dicaTipo(p.tipo).dica ? '' : 'hidden'}" id="p-dica">${esc(dicaTipo(p.tipo).dica)}</div>
+    <div>
     </div>
     ${novo ? `<div class="field"><span class="label">Tamanhos</span><span class="hint">Marque um ou vários — cada tamanho vira um item de estoque.</span>
         <div class="pills">${tamanhos.map((t) => `<label class="pill"><input type="checkbox" name="tam" value="${esc(t)}"><span>${esc(t)}</span></label>`).join('')}</div></div>`
@@ -1053,7 +1070,18 @@ function formProduto(p, depois, inicial = {}) {
     <div class="btn-row end">${novo ? '' : '<button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
   </form>`, {
     onMount(b, close) {
-      const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por peça ${brl(v - c)}` : ''; };
+      const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par' : 'peça'} ${brl(v - c)}` : ''; };
+      b.querySelector('#p-tipo').addEventListener('change', () => {
+        const d = dicaTipo(b.querySelector('#p-tipo').value);
+        b.querySelector('#p-modelo').placeholder = d.modelo;
+        const box = b.querySelector('#p-dica'); box.textContent = d.dica; box.classList.toggle('hidden', !d.dica);
+        if (d.unico) {
+          const u = b.querySelector('input[name=tam][value="Único"]');
+          if (u && ![...b.querySelectorAll('input[name=tam]:checked')].length) u.checked = true;
+          const sel = b.querySelector('#p-tam'); if (sel && [...sel.options].some((o) => o.value === 'Único') && !p.id) sel.value = 'Único';
+        }
+        mg();
+      });
       b.querySelector('#p-custo').oninput = mg; b.querySelector('#p-preco').oninput = mg; mg();
       b.querySelector('#p-cb').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
       b.querySelector('[data-cbcam]').onclick = async () => { const c = await lerCodigoCamera('Ler código de barras'); if (c) b.querySelector('#p-cb').value = c; };
@@ -1562,7 +1590,7 @@ ROTAS.auditoria = async (el) => {
    ========================================================= */
 ROTAS.config = async (el) => {
   S.listas = (await rpc('listas')) || S.listas;
-  const nomes = { tipo: 'Tipos de modelador', tamanho: 'Tamanhos (na ordem)', forma_pagamento: 'Formas de pagamento', cirurgia: 'Cirurgias (sugestões)' };
+  const nomes = { tipo: 'Tipos de produto', tamanho: 'Tamanhos (na ordem)', forma_pagamento: 'Formas de pagamento', cirurgia: 'Cirurgias (sugestões)' };
   el.innerHTML = `<div class="page-head"><h1>Configurações</h1></div>
     <div class="card"><h2>Cópia de segurança</h2>
       <p>Baixa um arquivo com todos os dados (produtos, movimentações, estornos, usuários sem senhas e auditoria). Guarde em local seguro — contém nomes de pacientes.</p>
