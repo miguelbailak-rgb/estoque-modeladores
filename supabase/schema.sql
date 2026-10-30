@@ -73,6 +73,9 @@ create table if not exists estoque.produtos (
   observacoes    text,
   criado_em      timestamptz not null default now()
 );
+-- código de barras do fabricante (EAN etc.), lido pela câmera
+alter table estoque.produtos add column if not exists codigo_barras text;
+create unique index if not exists produtos_codbarras_uk on estoque.produtos (codigo_barras) where codigo_barras is not null;
 
 create table if not exists estoque.movimentacoes (
   id              bigserial primary key,
@@ -385,7 +388,7 @@ begin
   adm := u.perfil = 'admin';
   return coalesce((
     select jsonb_agg(
-      jsonb_build_object('id', p.id, 'sku', p.sku, 'tipo', p.tipo, 'modelo', p.modelo, 'marca', p.marca,
+      jsonb_build_object('id', p.id, 'sku', p.sku, 'codigo_barras', p.codigo_barras, 'tipo', p.tipo, 'modelo', p.modelo, 'marca', p.marca,
         'fornecedor', p.fornecedor, 'tamanho', p.tamanho, 'cor', p.cor, 'preco', p.preco,
         'estoque_minimo', p.estoque_minimo, 'ativo', p.ativo, 'observacoes', p.observacoes,
         'nome', estoque._prod_nome(p), 'saldo', coalesce(s.saldo, 0))
@@ -499,21 +502,26 @@ end $$;
 
 create or replace function public.salvar_produto(p_token text, p jsonb) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
-declare u estoque.usuarios; ant estoque.produtos; novo estoque.produtos; pid int;
+declare u estoque.usuarios; ant estoque.produtos; novo estoque.produtos; pid int; cb text; restr text;
 begin
   u := estoque._admin(p_token);
+  cb := regexp_replace(coalesce(p ->> 'codigo_barras',''), '\s', '', 'g');
+  if cb = '' then cb := null; end if;
+  if cb is not null and exists (select 1 from estoque.produtos where upper(sku) = upper(cb) and id is distinct from nullif(p ->> 'id','')::int) then
+    raise exception 'Este código de barras é igual ao código interno de outro produto.';
+  end if;
   if estoque._txt(p,'tipo') is null or estoque._txt(p,'modelo') is null or estoque._txt(p,'tamanho') is null then
     raise exception 'Preencha tipo, modelo e tamanho.';
   end if;
   pid := nullif(p ->> 'id','')::int;
   if pid is null then
     insert into estoque.produtos (sku, tipo, modelo, marca, fornecedor, tamanho, cor, custo, preco,
-           estoque_minimo, ativo, observacoes)
+           estoque_minimo, ativo, observacoes, codigo_barras)
     values (coalesce(upper(estoque._txt(p,'sku')), 'TMP-' || gen_random_uuid()), estoque._txt(p,'tipo'),
             estoque._txt(p,'modelo'), estoque._txt(p,'marca'), estoque._txt(p,'fornecedor'), estoque._txt(p,'tamanho'),
             estoque._txt(p,'cor'), coalesce(estoque._num(p,'custo'),0), coalesce(estoque._num(p,'preco'),0),
             coalesce((p ->> 'estoque_minimo')::int, 0), coalesce((p ->> 'ativo')::boolean, true),
-            estoque._txt(p,'observacoes'))
+            estoque._txt(p,'observacoes'), cb)
     returning * into novo;
     if novo.sku like 'TMP-%' then
       update estoque.produtos set sku = 'MOD-' || lpad(novo.id::text, 4, '0') where id = novo.id returning * into novo;
@@ -529,7 +537,7 @@ begin
       marca = estoque._txt(p,'marca'), fornecedor = estoque._txt(p,'fornecedor'), tamanho = estoque._txt(p,'tamanho'),
       cor = estoque._txt(p,'cor'), custo = coalesce(estoque._num(p,'custo'),0), preco = coalesce(estoque._num(p,'preco'),0),
       estoque_minimo = coalesce((p ->> 'estoque_minimo')::int, 0), ativo = coalesce((p ->> 'ativo')::boolean, true),
-      observacoes = estoque._txt(p,'observacoes')
+      observacoes = estoque._txt(p,'observacoes'), codigo_barras = cb
     where id = pid returning * into novo;
     if novo.custo <> ant.custo or novo.preco <> ant.preco then
       insert into estoque.historico_precos (produto_id, custo_ant, custo_novo, preco_ant, preco_novo, usuario_id)
@@ -539,6 +547,10 @@ begin
   end if;
   return to_jsonb(novo);
 exception when unique_violation then
+  get stacked diagnostics restr = constraint_name;
+  if restr = 'produtos_codbarras_uk' then
+    raise exception 'Este código de barras já está cadastrado em outro produto.';
+  end if;
   raise exception 'Já existe um produto com este código (SKU).';
 end $$;
 

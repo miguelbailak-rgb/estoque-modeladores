@@ -292,6 +292,29 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
 .empty { text-align: center; padding: 36px 16px; color: var(--ink-3); border: 1.5px dashed var(--line-2); border-radius: var(--radius); }
 .print-only { display: none; }
 
+/* ---------- Leitor de códigos ---------- */
+.busca-linha { display: flex; gap: 8px; align-items: stretch; }
+.busca-linha input { flex: 1; min-width: 0; }
+.btn.cam { flex: none; padding: 0 14px; border-color: var(--accent); color: var(--accent); }
+.btn.cam svg { width: 24px; height: 24px; }
+@media (max-width: 380px) { .btn.cam span { display: none; } }
+.leitor-dica { font-size: 1.1rem; }
+.leitor-cam { width: 100%; min-height: 240px; background: #111; border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 14px; }
+.leitor-cam video { width: 100% !important; display: block; object-fit: cover; }
+.leitor-cam img { display: none; }
+.leitor-manual label { font-weight: 600; color: var(--ink-2); display: block; margin-bottom: 6px; }
+.codigo-grande { font-size: 1.3rem; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+
+/* ---------- Etiquetas ---------- */
+.folha-etiquetas { display: grid; grid-template-columns: repeat(auto-fill, 63.5mm); gap: 2.5mm; background: #fff; padding: 4mm; border-radius: var(--radius-sm); overflow-x: auto; }
+.etiqueta { width: 63.5mm; height: 38.1mm; padding: 3mm; display: flex; align-items: center; gap: 3mm; background: #fff; color: #000; border: 1px dashed #bbb; border-radius: 2mm; overflow: hidden; break-inside: avoid; }
+.etiqueta .qr { width: 27mm; height: 27mm; flex: none; }
+.etiqueta .qr svg { width: 100%; height: 100%; display: block; }
+.etiqueta .et-txt { min-width: 0; line-height: 1.15; }
+.etiqueta .et-nome { font-weight: 800; font-size: 10.5pt; }
+.etiqueta .et-tam { font-weight: 800; font-size: 15pt; margin: 1mm 0; }
+.etiqueta .et-sku { font-size: 8.5pt; }
+
 /* ---------- Impressão ---------- */
 @media print {
   :root { --bg: #fff; --surface: #fff; --ink: #000; --ink-3: #444; --line: #bbb; --line-2: #888; }
@@ -303,6 +326,10 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
   body.imprimir-modal .modal-back { position: static; background: none; display: block; }
   body.imprimir-modal .modal-card { max-height: none; overflow: visible; box-shadow: none; padding: 0; max-width: 80mm; margin: 0 auto; }
   body.imprimir-relatorio .content > *:not(#relatorio-saida) { display: none !important; }
+  body.imprimir-etiquetas .content > *:not(#etiquetas-saida) { display: none !important; }
+  body.imprimir-etiquetas .folha-etiquetas { grid-template-columns: repeat(3, 63.5mm); gap: 0 2.5mm; padding: 0; justify-content: center; }
+  body.imprimir-etiquetas .etiqueta { border-color: transparent; border-radius: 0; }
+  @page { size: A4; margin: 15mm 7mm 10mm; }
   .chart-box { height: 220px; break-inside: avoid; }
   .table-wrap { overflow: visible; border: 0; }
   th { position: static; }

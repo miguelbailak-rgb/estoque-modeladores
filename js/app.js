@@ -72,6 +72,8 @@ const ICON = {
   auditoria: '<path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>',
   config: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  camera: '<path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16.5 8v8"/>',
+  etiquetas: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>',
   sair: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
 };
 const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n] || ''}</svg>`;
@@ -274,7 +276,7 @@ const NAV_OPER = [
 ];
 const NAV_ADMIN = [
   ['painel', 'Painel'], ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'],
-  ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['estornos', 'Estornos'],
+  ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'],
   ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Configurações'],
 ];
 const ROTAS = {};
@@ -335,10 +337,175 @@ async function iniciar() {
 }
 
 /* =========================================================
+   LEITURA DE CÓDIGOS
+   - câmera do celular/iPad (código de barras e QR code)
+   - leitor de mão USB/Bluetooth (funciona como teclado: digita o código e aperta Enter)
+   ========================================================= */
+const LIBS = {
+  leitor: 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
+  qr: 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js',
+};
+const scriptsCarregando = {};
+function carregarScript(url) {
+  if (!scriptsCarregando[url]) {
+    scriptsCarregando[url] = new Promise((ok, erro) => {
+      const s = document.createElement('script');
+      s.src = url; s.async = true; s.onload = ok;
+      s.onerror = () => { delete scriptsCarregando[url]; erro(new Error('Não foi possível carregar o leitor. Verifique a internet.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return scriptsCarregando[url];
+}
+
+const limpaCodigo = (c) => String(c ?? '').trim().replace(/\s+/g, '');
+function produtoPorCodigo(cod) {
+  const c = limpaCodigo(cod); if (!c) return null;
+  const cu = c.toUpperCase();
+  return S.produtos.find((p) => p.codigo_barras && p.codigo_barras === c)
+    || S.produtos.find((p) => p.sku && p.sku.toUpperCase() === cu)
+    || null;
+}
+
+function bip() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
+    const ctx = bip.ctx || (bip.ctx = new Ctx());
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 1750; g.gain.value = 0.08;
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.09);
+  } catch { /* sem som */ }
+  try { if (navigator.vibrate) navigator.vibrate(60); } catch { /* sem vibração */ }
+}
+
+// Abre a câmera e devolve o texto lido (ou null se cancelar)
+function lerCodigoCamera(titulo = 'Ler código') {
+  return new Promise((resolve) => {
+    let leitor = null, resultado = null, fechado = false;
+    const pararCamera = async () => {
+      const l = leitor; leitor = null;
+      if (!l) return;
+      try { await l.stop(); } catch { /* já parado */ }
+      try { l.clear(); } catch { /* idem */ }
+    };
+    modal(titulo, `<p class="leitor-dica">Aponte a câmera para o <b>código de barras</b> ou <b>QR code</b>.</p>
+      <div id="leitor-cam" class="leitor-cam"><div class="carregando" style="color:#fff">Abrindo a câmera…</div></div>
+      <div id="leitor-erro"></div>
+      <form id="leitor-manual" class="leitor-manual" autocomplete="off">
+        <label for="lm-cod">Ou digite o código (ou use o leitor de mão)</label>
+        <div class="busca-linha"><input id="lm-cod" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn primary" type="submit">OK</button></div>
+      </form>
+      <div class="btn-row end" style="margin-top:12px"><button type="button" class="btn" data-x>Cancelar</button></div>`, {
+      onClose: () => { fechado = true; pararCamera(); resolve(resultado); },
+      async onMount(b, close) {
+        const terminar = (txt) => {
+          if (resultado !== null || fechado) return;
+          resultado = limpaCodigo(txt); bip(); close();
+        };
+        b.querySelector('#leitor-manual').onsubmit = (e) => { e.preventDefault(); const v = b.querySelector('#lm-cod').value; if (limpaCodigo(v)) terminar(v); };
+        const cam = b.querySelector('#leitor-cam');
+        try {
+          if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Este navegador não liberou a câmera para o site.');
+          }
+          await carregarScript(LIBS.leitor);
+          if (fechado) return;
+          const F = window.Html5QrcodeSupportedFormats;
+          cam.innerHTML = '';
+          const l = new window.Html5Qrcode('leitor-cam', {
+            verbose: false,
+            formatsToSupport: [F.QR_CODE, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.DATA_MATRIX],
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          });
+          leitor = l;
+          await l.start({ facingMode: 'environment' }, {
+            fps: 12,
+            qrbox: (w, h) => ({ width: Math.max(120, Math.floor(Math.min(w * 0.88, 460))), height: Math.max(80, Math.floor(Math.min(h * 0.6, 240))) }),
+          }, (txt) => terminar(txt), () => {});
+          if (fechado) pararCamera();
+        } catch (e) {
+          const nome = String((e && (e.name || e.message)) || e);
+          const msg = /NotAllowed|Permission|denied/i.test(nome)
+            ? 'A câmera foi bloqueada. Para liberar: no iPhone/iPad vá em Ajustes › Safari › Câmera › Permitir; no Android toque no cadeado ao lado do endereço › Permissões › Câmera.'
+            : /NotFound|Requested device|no camera|Overconstrained/i.test(nome) ? 'Nenhuma câmera encontrada neste aparelho.'
+            : /NotReadable|in use|Could not start/i.test(nome) ? 'A câmera está sendo usada por outro aplicativo. Feche-o e tente de novo.'
+            : (e && e.message) || 'Não foi possível abrir a câmera.';
+          leitor = null;
+          cam.classList.add('hidden');
+          b.querySelector('#leitor-erro').innerHTML = `<div class="warn-box">${esc(msg)}<br>Você pode digitar o código abaixo.</div>`;
+          b.querySelector('#lm-cod').focus();
+        }
+      },
+    });
+  });
+}
+
+// Leitor de mão (USB/Bluetooth): caracteres digitados muito rápido + Enter, fora de campos de texto
+let aoLerCodigo = null; // cada tela registra o que fazer com o código lido
+const wedge = { buf: '', ultimo: 0, inicio: 0 };
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  const agora = performance.now();
+  if (e.key === 'Enter') {
+    const ok = wedge.buf.length >= 4 && (agora - wedge.inicio) < wedge.buf.length * 50 + 150;
+    const cod = wedge.buf; wedge.buf = '';
+    if (ok && aoLerCodigo && !document.querySelector('.modal-back')) { e.preventDefault(); bip(); aoLerCodigo(cod); }
+    return;
+  }
+  if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (agora - wedge.ultimo > 80) { wedge.buf = ''; wedge.inicio = agora; }
+  wedge.buf += e.key; wedge.ultimo = agora;
+});
+window.addEventListener('hashchange', () => { aoLerCodigo = null; });
+
+// Código lido que não está cadastrado
+function codigoNaoCadastrado(cod, aoVincular) {
+  if (!isAdmin()) {
+    modal('Código não cadastrado', `<p class="leitor-dica">O código <b class="codigo-grande">${esc(cod)}</b> não está cadastrado em nenhum produto.</p>
+      <p>Peça ao administrador para cadastrar este código, ou procure o produto pelo nome.</p>
+      <div class="btn-row end"><button class="btn primary" data-x>Entendi</button></div>`);
+    return;
+  }
+  modal('Código não cadastrado', `<p class="leitor-dica">O código <b class="codigo-grande">${esc(cod)}</b> ainda não está em nenhum produto.</p>
+    <p>Este é o código de barras de qual produto?</p>
+    <div class="field"><div id="vinc-pk"></div></div>
+    <div class="btn-row end"><button type="button" class="btn" data-x>Cancelar</button><button type="button" class="btn" id="vinc-novo">Cadastrar produto novo</button><button type="button" class="btn primary" id="vinc-ok" disabled>Gravar código neste produto</button></div>`, {
+    onMount(b, close) {
+      const okBtn = b.querySelector('#vinc-ok');
+      const pk = seletorProduto(b.querySelector('#vinc-pk'), { semLeitor: true, onChange: (p) => { okBtn.disabled = !p; } });
+      okBtn.onclick = async () => {
+        const p = pk.get(); if (!p) return;
+        if (p.codigo_barras && !(await confirmar('Trocar código', `Este produto já tem o código ${esc(p.codigo_barras)}. Trocar por ${esc(cod)}?`, { ok: 'Trocar' }))) return;
+        const r = await tentar(() => rpc('salvar_produto', { p: { ...p, codigo_barras: cod } }), okBtn);
+        if (!r) return;
+        toast('Código gravado no produto.', 'ok'); close();
+        await recarregarProdutos();
+        if (aoVincular) aoVincular(produtoPorCodigo(cod));
+      };
+      b.querySelector('#vinc-novo').onclick = () => { close(); formProduto(null, () => { const p = produtoPorCodigo(cod); if (p && aoVincular) aoVincular(p); }, { codigo_barras: cod }); };
+    },
+  });
+}
+
+// Botão "Ler código" (câmera)
+const botaoCamera = (attr = 'data-cam') => `<button type="button" class="btn cam" ${attr} aria-label="Ler código pela câmera">${icon('camera')}<span>Ler código</span></button>`;
+
+/* =========================================================
    SELETOR DE PRODUTO (usado em entrada, saída e ajustes)
    ========================================================= */
-function seletorProduto(container, { onChange, exigeSaldo = false } = {}) {
+function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = false } = {}) {
   let escolhido = null;
+  // aplica um código lido (câmera, leitor de mão ou digitado + Enter)
+  const aplicarCodigo = (cod) => {
+    const p = produtoPorCodigo(cod);
+    if (!p) { codigoNaoCadastrado(limpaCodigo(cod), (np) => { if (np) aplicarCodigo(np.sku); }); return; }
+    if (!p.ativo) { toast(`${p.nome} está inativo.`, 'err'); return; }
+    if (exigeSaldo && p.saldo <= 0) { toast(`Sem estoque de ${p.nome}.`, 'err'); return; }
+    escolhido = p; desenhar(); onChange && onChange(p);
+    toast(p.nome, 'ok');
+  };
+  if (!semLeitor) aoLerCodigo = (cod) => { if (container.isConnected) aplicarCodigo(cod); };
   const desenhar = () => {
     if (escolhido) {
       const p = escolhido;
@@ -348,14 +515,25 @@ function seletorProduto(container, { onChange, exigeSaldo = false } = {}) {
       container.querySelector('[data-trocar]').onclick = () => { escolhido = null; desenhar(); onChange && onChange(null); container.querySelector('input').focus(); };
       return;
     }
-    container.innerHTML = `<input type="search" placeholder="Digite: cinta, sutiã, M, GG, código…" aria-label="Buscar produto" autocomplete="off">
+    container.innerHTML = `<div class="busca-linha"><input type="search" placeholder="Buscar produto" aria-label="Buscar produto por nome, tamanho ou código" autocomplete="off" enterkeyhint="search">${semLeitor ? '' : botaoCamera()}</div>
       <div class="picker-results"></div>`;
     const inp = container.querySelector('input');
+    const cam = container.querySelector('[data-cam]');
+    if (cam) cam.onclick = async () => { const cod = await lerCodigoCamera(); if (cod) aplicarCodigo(cod); };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const v = limpaCodigo(inp.value); if (!v) return;
+      if (produtoPorCodigo(v)) { aplicarCodigo(v); return; }
+      const itens = [...res.querySelectorAll('.pick-item:not([disabled])')];
+      if (itens.length === 1) { itens[0].click(); return; }
+      if (/^[0-9]{6,}$/.test(v) && !semLeitor) aplicarCodigo(v); // parece código de barras
+    });
     const res = container.querySelector('.picker-results');
     const filtrar = () => {
       const termos = norm(inp.value).split(/\s+/).filter(Boolean);
       const lista = S.produtos.filter((p) => p.ativo).filter((p) => {
-        const alvo = norm([p.nome, p.sku, p.marca, p.tipo, p.tamanho, p.cor].join(' '));
+        const alvo = norm([p.nome, p.sku, p.marca, p.tipo, p.tamanho, p.cor, p.codigo_barras].join(' '));
         const palavras = alvo.split(/[\s·\-\/]+/);
         return termos.every((t) => (t.length === 1 ? palavras.includes(t) : t.length === 2 ? palavras.some((w) => w.startsWith(t)) : alvo.includes(t)));
       }).slice(0, 60);
@@ -569,7 +747,7 @@ ROTAS.estoque = async (el) => {
   const tipos = [...new Set(S.produtos.map((p) => p.tipo))].sort();
   el.innerHTML = `<div class="page-head"><h1>Estoque</h1>${isAdmin() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
     <div class="toolbar">
-      <div class="field grow"><label for="es-q">Buscar</label><input id="es-q" type="search" placeholder="Nome, tamanho, código…"></div>
+      <div class="field grow"><label for="es-q">Buscar</label><div class="busca-linha"><input id="es-q" type="search" placeholder="Nome, tamanho, código…" enterkeyhint="search">${botaoCamera()}</div></div>
       <div class="field"><label for="es-tipo">Tipo</label><select id="es-tipo">${optionsHtml(tipos, '', 'Todos')}</select></div>
       <label class="check"><input type="checkbox" id="es-low"> Só no mínimo / abaixo</label>
     </div>
@@ -581,7 +759,7 @@ ROTAS.estoque = async (el) => {
     const lista = S.produtos.filter((p) => (isAdmin() ? true : p.ativo))
       .filter((p) => !tipo.value || p.tipo === tipo.value)
       .filter((p) => !low.checked || (p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo))
-      .filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.cor].join(' ')); return termos.every((t) => a.includes(t)); });
+      .filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.cor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
     const totQ = sum(lista, (p) => Math.max(p.saldo, 0));
     el.querySelector('#es-resumo').innerHTML = `<p class="muted">${nf(lista.length)} itens · ${nf(totQ)} unidades${isAdmin() ? ` · Valor a custo: <b>${brl(sum(lista, (p) => Math.max(p.saldo, 0) * p.custo))}</b> · a preço de venda: <b>${brl(sum(lista, (p) => Math.max(p.saldo, 0) * p.preco))}</b>` : ''}</p>`;
     el.querySelector('#es-lista').innerHTML = lista.length ? lista.map((p) => {
@@ -594,6 +772,14 @@ ROTAS.estoque = async (el) => {
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
   [q, tipo, low].forEach((x) => x.addEventListener('input', desenhar));
+  const mostrarCodigo = (cod) => {
+    const p = produtoPorCodigo(cod);
+    if (!p) { codigoNaoCadastrado(limpaCodigo(cod), (np) => { if (np) { q.value = np.sku; desenhar(); } }); return; }
+    tipo.value = ''; low.checked = false; q.value = p.sku; desenhar();
+  };
+  aoLerCodigo = mostrarCodigo;
+  el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera(); if (c) mostrarCodigo(c); };
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = limpaCodigo(q.value); if (produtoPorCodigo(v) || /^[0-9]{6,}$/.test(v)) mostrarCodigo(v); } });
   el.querySelector('#es-lista').onclick = (e) => {
     const b = e.target.closest('[data-aj]'); if (!b) return;
     ajusteInventario(S.produtos.find((p) => p.id === Number(b.dataset.aj)), () => desenhar());
@@ -763,27 +949,35 @@ ROTAS.painel = async (el) => {
 ROTAS.produtos = async (el) => {
   await recarregarProdutos();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
-    <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…"></div>
+    <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
     <label class="check"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
     <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th><th class="num">Custo</th><th class="num">Venda</th><th class="num">Margem</th><th class="num">Mín.</th><th class="num">Saldo</th><th></th></tr></thead><tbody id="pr-body"></tbody></table></div>`;
   const q = el.querySelector('#pr-q'), inat = el.querySelector('#pr-inat');
   const desenhar = () => {
     const termos = norm(q.value).split(/\s+/).filter(Boolean);
-    const lista = S.produtos.filter((p) => inat.checked || p.ativo).filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.fornecedor].join(' ')); return termos.every((t) => a.includes(t)); });
+    const lista = S.produtos.filter((p) => inat.checked || p.ativo).filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.fornecedor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
     el.querySelector('#pr-body').innerHTML = lista.length ? lista.map((p) => `<tr class="${p.ativo ? '' : 'estornado'}">
-      <td class="nowrap">${esc(p.sku)}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
+      <td class="nowrap">${esc(p.sku)}${p.codigo_barras ? `<div class="small muted">${esc(p.codigo_barras)}</div>` : ''}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
       <td class="num">${brl(p.custo)}</td><td class="num">${brl(p.preco)}</td><td class="num">${pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>
       <td class="num">${nf(p.estoque_minimo)}</td><td class="num"><b>${nf(p.saldo)}</b></td>
       <td><button class="btn sm" data-ed="${p.id}">Editar</button></td></tr>`).join('') : '<tr><td colspan="8" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>';
   };
   [q, inat].forEach((x) => x.addEventListener('input', desenhar));
   el.querySelector('#pr-novo').onclick = () => formProduto(null, desenhar);
+  const abrirCodigo = (cod) => {
+    const p = produtoPorCodigo(cod);
+    if (p) { inat.checked = inat.checked || !p.ativo; q.value = p.sku; desenhar(); formProduto(p, desenhar); return; }
+    codigoNaoCadastrado(limpaCodigo(cod), () => desenhar());
+  };
+  aoLerCodigo = abrirCodigo;
+  el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera(); if (c) abrirCodigo(c); };
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = limpaCodigo(q.value); if (produtoPorCodigo(v) || /^[0-9]{6,}$/.test(v)) abrirCodigo(v); } });
   el.querySelector('#pr-body').onclick = (e) => { const b = e.target.closest('[data-ed]'); if (b) formProduto(S.produtos.find((p) => p.id === Number(b.dataset.ed)), desenhar); };
   desenhar();
 };
 
-function formProduto(p, depois) {
-  const L = S.listas; const novo = !p; p = p || { ativo: true, estoque_minimo: 0 };
+function formProduto(p, depois, inicial = {}) {
+  const L = S.listas; const novo = !p; p = p || { ativo: true, estoque_minimo: 0, ...inicial };
   const tamanhos = L.tamanho || [];
   modal(novo ? 'Novo produto' : 'Editar produto', `<form id="f-prod" novalidate>
     <div class="grid2">
@@ -804,6 +998,9 @@ function formProduto(p, depois) {
       <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"></div>
     </div>
     <p class="muted small" id="p-margem"></p>
+    <div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
+      <div class="busca-linha"><input id="p-cb" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(p.codigo_barras)}" placeholder="Leia com a câmera ou o leitor de mão">${botaoCamera('data-cbcam')}</div>
+      <span class="hint">${novo ? 'Se marcar vários tamanhos, deixe vazio e grave o código de cada tamanho depois (cada tamanho tem um código diferente).' : 'Cada tamanho/cor tem o seu próprio código de barras.'}</span></div>
     <div class="grid2">
       <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
       <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
@@ -814,6 +1011,8 @@ function formProduto(p, depois) {
     onMount(b, close) {
       const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por peça ${brl(v - c)}` : ''; };
       b.querySelector('#p-custo').oninput = mg; b.querySelector('#p-preco').oninput = mg; mg();
+      b.querySelector('#p-cb').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+      b.querySelector('[data-cbcam]').onclick = async () => { const c = await lerCodigoCamera('Ler código de barras'); if (c) b.querySelector('#p-cb').value = c; };
       const h = b.querySelector('#p-hist');
       if (h) h.onclick = async () => {
         const hist = await tentar(() => rpc('historico_precos', { p_produto: p.id })); if (!hist) return;
@@ -828,11 +1027,13 @@ function formProduto(p, depois) {
         if (!val('#p-tipo') || !val('#p-modelo')) return toast('Preencha tipo e modelo.', 'err');
         if (Number.isNaN(custo) || Number.isNaN(preco)) return toast('Confira custo e preço.', 'err');
         const base = { tipo: val('#p-tipo'), modelo: val('#p-modelo'), cor: val('#p-cor'), marca: val('#p-marca'), fornecedor: val('#p-forn'),
-          custo: custo || 0, preco: preco || 0, estoque_minimo: parseInt(val('#p-min'), 10) || 0, ativo: b.querySelector('#p-ativo').checked, observacoes: val('#p-obs') };
+          custo: custo || 0, preco: preco || 0, estoque_minimo: parseInt(val('#p-min'), 10) || 0, ativo: b.querySelector('#p-ativo').checked, observacoes: val('#p-obs'),
+          codigo_barras: limpaCodigo(val('#p-cb')) || null };
         const ok = await tentar(async () => {
           if (novo) {
             const tams = [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
             if (!tams.length) throw new Error('Marque pelo menos um tamanho.');
+            if (base.codigo_barras && tams.length > 1) throw new Error('Com código de barras, marque só um tamanho (cada tamanho tem um código).');
             for (const t of tams) await rpc('salvar_produto', { p: { ...base, tamanho: t } });
             return tams.length;
           }
@@ -846,6 +1047,73 @@ function formProduto(p, depois) {
     },
   });
 }
+
+/* =========================================================
+   ETIQUETAS COM QR CODE (admin)
+   ========================================================= */
+ROTAS.etiquetas = async (el) => {
+  await recarregarProdutos();
+  el.innerHTML = `<div class="page-head"><h1>Etiquetas</h1></div>
+    <div class="card no-print">
+      <p>Imprima etiquetas com <b>QR code</b> para colar nos modeladores que não têm código de barras. Depois é só ler a etiqueta com a câmera ou o leitor de mão na Saída e na Entrada.</p>
+      <div class="toolbar"><div class="field grow"><label for="et-q">Buscar</label><input id="et-q" type="search" placeholder="Nome, tamanho, código…"></div>
+        <label class="check"><input type="checkbox" id="et-preco"> Mostrar preço</label>
+        <label class="check"><input type="checkbox" id="et-saldo"> Quantidade = estoque atual</label></div>
+      <div class="btn-row" style="margin-bottom:12px"><button class="btn sm" id="et-todos">Marcar todos</button><button class="btn sm" id="et-nenhum">Desmarcar</button></div>
+      <div class="table-wrap" style="max-height:420px"><table><thead><tr><th></th><th>Produto</th><th class="num">Estoque</th><th class="num">Etiquetas</th></tr></thead><tbody id="et-body"></tbody></table></div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn primary big" id="et-imprimir">Imprimir etiquetas</button><span class="muted" id="et-total" style="align-self:center"></span></div>
+      <p class="muted small" style="margin-top:10px">Folha A4 com 3 colunas × 7 linhas (etiquetas de 63,5 × 38,1 mm, tipo Pimaco A4360/A4260). Também dá para imprimir em papel comum e recortar.</p>
+    </div>
+    <div id="etiquetas-saida"></div>`;
+  const $ = (x) => el.querySelector(x);
+  const qtd = {}; // id -> quantidade
+  const ativos = () => S.produtos.filter((p) => p.ativo);
+  const desenharLista = () => {
+    const termos = norm($('#et-q').value).split(/\s+/).filter(Boolean);
+    const lista = ativos().filter((p) => { const a = norm([p.nome, p.sku, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
+    $('#et-body').innerHTML = lista.length ? lista.map((p) => `<tr>
+      <td><label class="check" style="min-height:0"><input type="checkbox" data-sel="${p.id}" ${qtd[p.id] ? 'checked' : ''} aria-label="Selecionar ${esc(p.nome)}"></label></td>
+      <td>${esc(p.nome)}<div class="small muted">${esc(p.sku)}</div></td><td class="num">${nf(p.saldo)}</td>
+      <td class="num"><input type="number" inputmode="numeric" min="0" max="200" data-q="${p.id}" value="${qtd[p.id] || 0}" style="width:90px;min-height:44px;text-align:center"></td></tr>`).join('')
+      : '<tr><td colspan="4" class="muted">Nenhum produto.</td></tr>';
+    totais();
+  };
+  const totais = () => {
+    const n = Object.values(qtd).reduce((a, b) => a + (b || 0), 0);
+    $('#et-total').textContent = n ? `${nf(n)} etiqueta(s) · ${nf(Math.ceil(n / 21))} folha(s)` : 'Nenhuma etiqueta selecionada';
+  };
+  const padrao = (p) => ($('#et-saldo').checked ? Math.max(p.saldo, 1) : 1);
+  $('#et-q').oninput = desenharLista;
+  $('#et-body').addEventListener('input', (e) => {
+    const s = e.target.closest('[data-sel]'), q = e.target.closest('[data-q]');
+    if (s) { const p = S.produtos.find((x) => x.id === Number(s.dataset.sel)); qtd[p.id] = s.checked ? padrao(p) : 0; desenharLista(); }
+    if (q) { const v = Math.min(200, Math.max(0, parseInt(q.value, 10) || 0)); qtd[Number(q.dataset.q)] = v; const cb = el.querySelector(`[data-sel="${q.dataset.q}"]`); if (cb) cb.checked = v > 0; totais(); }
+  });
+  $('#et-saldo').onchange = () => { Object.keys(qtd).forEach((id) => { if (qtd[id]) qtd[id] = padrao(S.produtos.find((p) => p.id === Number(id))); }); desenharLista(); };
+  $('#et-todos').onclick = () => { ativos().forEach((p) => { qtd[p.id] = qtd[p.id] || padrao(p); }); desenharLista(); };
+  $('#et-nenhum').onclick = () => { Object.keys(qtd).forEach((k) => delete qtd[k]); desenharLista(); };
+  $('#et-imprimir').onclick = (e) => tentar(async () => {
+    const itens = S.produtos.filter((p) => qtd[p.id] > 0);
+    if (!itens.length) throw new Error('Marque pelo menos um produto.');
+    await carregarScript(LIBS.qr);
+    const preco = $('#et-preco').checked;
+    const svg = (txt) => { const q = window.qrcode(0, 'M'); q.addData(txt); q.make(); return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); };
+    const blocos = [];
+    itens.forEach((p) => {
+      const qr = svg(p.sku);
+      const html = `<div class="etiqueta"><div class="qr">${qr}</div><div class="et-txt">
+        <div class="et-nome">${esc(p.tipo)} ${esc(p.modelo)}</div>
+        <div class="et-tam">${esc(p.tamanho)}${p.cor ? ' · ' + esc(p.cor) : ''}</div>
+        <div class="et-sku">${esc(p.sku)}${preco ? ' · ' + brl(p.preco) : ''}</div></div></div>`;
+      for (let i = 0; i < qtd[p.id]; i++) blocos.push(html);
+    });
+    $('#etiquetas-saida').innerHTML = `<h2 class="no-print" style="margin-top:8px">Prévia</h2><div class="folha-etiquetas">${blocos.join('')}</div>`;
+    await new Promise((r) => setTimeout(r, 150));
+    document.body.classList.add('imprimir-etiquetas'); window.print();
+    setTimeout(() => document.body.classList.remove('imprimir-etiquetas'), 500);
+  }, e.currentTarget);
+  desenharLista();
+};
 
 /* =========================================================
    ESTORNOS (admin)
