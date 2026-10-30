@@ -174,7 +174,8 @@ where not exists (select 1 from estoque.usuarios);
 insert into estoque.listas (categoria, valor, ordem) values
   ('tipo','Cinta',1), ('tipo','Body / macacão',2), ('tipo','Sutiã pós-cirúrgico',3),
   ('tipo','Faixa abdominal',4), ('tipo','Faixa de mento / face',5), ('tipo','Meia compressiva',6),
-  ('tipo','Placa compressiva',7), ('tipo','Espuma',8), ('tipo','Outros',9),
+  ('tipo','Placa abdominal',7), ('tipo','Placa lateral (flancos)',8), ('tipo','Placa lombar',9),
+  ('tipo','Espuma',10), ('tipo','Outros',11),
   ('tamanho','PP',1), ('tamanho','P',2), ('tamanho','M',3), ('tamanho','G',4),
   ('tamanho','GG',5), ('tamanho','XG',6), ('tamanho','EXG',7), ('tamanho','Único',8),
   ('forma_pagamento','Pix',1), ('forma_pagamento','Dinheiro',2), ('forma_pagamento','Débito',3),
