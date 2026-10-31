@@ -210,8 +210,9 @@ begin
   if u.trocar_senha and not p_permite_troca then
     raise exception 'TROCAR_SENHA' using hint = 'Troque sua senha para continuar.';
   end if;
+  -- renova a sessão (30 min) no máximo 1x por minuto: evita gravação e espera entre consultas simultâneas
   update estoque.sessoes set expira_em = now() + interval '30 minutes'
-   where token_hash = estoque._hash(p_token);
+   where token_hash = estoque._hash(p_token) and expira_em < now() + interval '29 minutes';
   return u;
 end $$;
 
@@ -352,6 +353,21 @@ begin
   return jsonb_build_object('id', u.id, 'nome', u.nome, 'login', u.login,
                             'perfil', u.perfil, 'trocar_senha', u.trocar_senha,
                             'cadastro_ate', case when u.cadastro_ate > now() then u.cadastro_ate end);
+end $$;
+
+-- Tudo o que o aplicativo precisa ao abrir, numa consulta só
+create or replace function public.inicio(p_token text) returns jsonb
+language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios; usr jsonb;
+begin
+  u := estoque._sessao(p_token, true);
+  usr := jsonb_build_object('id', u.id, 'nome', u.nome, 'login', u.login, 'perfil', u.perfil, 'trocar_senha', u.trocar_senha,
+                            'cadastro_ate', case when u.cadastro_ate > now() then u.cadastro_ate end);
+  if u.trocar_senha then return jsonb_build_object('usuario', usr); end if;
+  return jsonb_build_object('usuario', usr,
+    'produtos', public.produtos(p_token),
+    'listas', public.listas(p_token),
+    'pendentes', case when u.perfil = 'admin' then (select count(*) from estoque.estornos where status = 'pendente') else 0 end);
 end $$;
 
 create or replace function public.trocar_senha(p_token text, p_senha_atual text, p_senha_nova text)
@@ -656,9 +672,24 @@ language plpgsql security definer set search_path = estoque, extensions, public 
 begin
   perform estoque._admin(p_token);
   if p_ate - p_de > 1100 then raise exception 'Escolha um período de até 3 anos.'; end if;
+  -- consulta única (sem subconsultas por linha): rápida mesmo com muitos lançamentos
   return coalesce((
-    select jsonb_agg(estoque._mov_json(m, true) order by m.data desc)
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'data', m.data, 'tipo', m.tipo, 'motivo', m.motivo,
+      'produto_id', m.produto_id, 'sku', p.sku, 'produto', estoque._prod_nome(p),
+      'tipo_produto', p.tipo, 'tamanho', p.tamanho,
+      'qtd', m.qtd, 'valor_unitario', m.valor_unitario, 'desconto', m.desconto,
+      'valor_total', m.valor_total, 'forma_pagamento', m.forma_pagamento,
+      'fornecedor', m.fornecedor, 'nota_fiscal', m.nota_fiscal,
+      'paciente_nome', m.paciente_nome, 'cirurgia', m.cirurgia, 'data_cirurgia', m.data_cirurgia,
+      'observacao', m.observacao, 'usuario', u.nome, 'usuario_id', m.usuario_id,
+      'estornado', m.estornado, 'estorno_de', m.estorno_de,
+      'estorno_pendente', ep.movimentacao_id is not null,
+      'custo_unitario', m.custo_unitario) order by m.data desc)
     from estoque.movimentacoes m
+    join estoque.produtos p on p.id = m.produto_id
+    join estoque.usuarios u on u.id = m.usuario_id
+    left join (select distinct movimentacao_id from estoque.estornos where status = 'pendente') ep on ep.movimentacao_id = m.id
     where m.data >= (p_de::timestamp at time zone 'America/Sao_Paulo')
       and m.data <  ((p_ate + 1)::timestamp at time zone 'America/Sao_Paulo')), '[]'::jsonb);
 end $$;
@@ -820,7 +851,7 @@ begin
     execute 'revoke all on all tables in schema estoque from anon, authenticated';
     execute 'revoke all on all functions in schema estoque from anon, authenticated';
     foreach f in array array[
-      'login(text,text)','logout(text)','sessao(text)','trocar_senha(text,text,text)','listas(text)',
+      'login(text,text)','logout(text)','sessao(text)','inicio(text)','trocar_senha(text,text,text)','listas(text)',
       'produtos(text)','registrar_entrada(text,jsonb)','registrar_saida(text,jsonb)','lancamentos_dia(text,date)',
       'solicitar_estorno(text,bigint,text)','salvar_produto(text,jsonb)','historico_precos(text,int)',
       'ajustar_inventario(text,int,int,text)','estornos(text,text)','decidir_estorno(text,int,boolean,text)',
