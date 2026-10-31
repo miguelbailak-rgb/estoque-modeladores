@@ -11,7 +11,10 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/style.css?v=7">
+  <!-- abre a conexão com o banco enquanto o resto da página carrega -->
+  <link rel="preconnect" href="https://ywxdtphftnmqokaoqmpf.supabase.co" crossorigin>
+  <link rel="preconnect" href="https://ywxdtphftnmqokaoqmpf.supabase.co">
+  <link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
   <div id="app" aria-live="polite">
@@ -20,8 +23,7 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="assertive"></div>
 
-  <script src="js/config.js?v=7"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
-  <script src="js/app.js?v=7" defer></script>
+  <script src="js/config.js?v=8"></script>
+  <script src="js/app.js?v=8" defer></script>
 </body>
 </html>

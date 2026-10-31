@@ -180,16 +180,37 @@ async function tentar(fn, btn) {
   finally { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.txt; } }
 }
 
-async function carregarBase() {
-  const [produtos, listas] = await Promise.all([rpc('produtos'), rpc('listas')]);
-  S.produtos = produtos || [];
-  S.listas = listas || {};
-  if (isAdmin()) {
-    const pend = await rpc('estornos', { p_status: 'pendente' }).catch(() => []);
-    S.pendentes = (pend || []).length;
-  }
+// Cópia local (neste aparelho) dos produtos e listas: as telas abrem na hora e se atualizam em seguida
+const CACHE_KEY = 'estoque_cache_v1';
+function salvarCache() {
+  if (!S.user || !S.carregado) return;
+  storage.set(CACHE_KEY, JSON.stringify({ uid: S.user.id, user: S.user, produtos: S.produtos, listas: S.listas, pendentes: S.pendentes, t: Date.now() }));
 }
-async function recarregarProdutos() { S.produtos = (await rpc('produtos')) || []; }
+function lerCache() {
+  try { const c = JSON.parse(storage.get(CACHE_KEY) || 'null'); return c && c.user && Array.isArray(c.produtos) ? c : null; } catch { return null; }
+}
+let aoAtualizarDados = null; // a tela aberta registra como se redesenhar quando chegam dados novos
+function avisarTela() { if (aoAtualizarDados) { try { aoAtualizarDados(); } catch { /* tela já fechou */ } } }
+
+// Uma consulta só: usuário + produtos + listas + estornos pendentes
+async function carregarBase() {
+  const r = await rpc('inicio');
+  if (!r || !S.user) return;
+  Object.assign(S.user, r.usuario || {});
+  if (r.usuario && r.usuario.trocar_senha) return;
+  S.produtos = r.produtos || [];
+  S.listas = r.listas || {};
+  S.pendentes = r.pendentes || 0;
+  S.carregado = Date.now();
+  ultimaVerificacao = Date.now(); agendarFimPrazo();
+  salvarCache();
+}
+async function recarregarProdutos() { S.produtos = (await rpc('produtos')) || []; S.carregado = Date.now(); salvarCache(); avisarTela(); }
+// Se já há dados, a tela abre na hora e os produtos se atualizam em segundo plano
+async function produtosRapido() {
+  if (S.carregado) { if (Date.now() - S.carregado > 5000) recarregarProdutos().catch(() => {}); return; }
+  await recarregarProdutos();
+}
 
 /* ---------------- sessão ---------------- */
 let idleTimer = null;
@@ -203,7 +224,8 @@ function marcarAtividade() {
 async function sair(msg) {
   const t = S.token;
   S.token = null; S.user = null;
-  storage.del('estoque_token');
+  storage.del('estoque_token'); storage.del(CACHE_KEY);
+  S.produtos = []; S.listas = {}; S.carregado = 0;
   clearTimeout(idleTimer);
   document.getElementById('modal-root').innerHTML = '';
   if (t) rpc('logout', { p_token: t }, { auth: false }).catch(() => {});
@@ -370,9 +392,12 @@ async function render() {
   if (!S.user) return telaLogin();
   if (S.user.trocar_senha) return telaTrocarSenha(true);
   const r = rotaAtual();
-  if (!isAdmin()) { try { Object.assign(S.user, await rpc('sessao')); ultimaVerificacao = Date.now(); agendarFimPrazo(); } catch (e) { if (!S.user) return; } }
+  // operador: a tela Produtos depende da liberação, então confere na hora; nas outras, em segundo plano
+  if (!isAdmin()) { if (r === 'produtos') await verificarLiberacao(true); else verificarLiberacao(); }
+  if (!S.user) return;
   const permitido = navAtual().some(([k]) => k === r);
   if (!permitido) { location.hash = '#/' + (isAdmin() ? 'painel' : 'saida'); return; }
+  aoLerCodigo = null; aoAtualizarDados = null; // a tela nova registra os seus
   shell();
   const el = document.getElementById('content');
   el.innerHTML = '<div class="carregando">Carregando…</div>';
@@ -509,7 +534,6 @@ document.addEventListener('keydown', (e) => {
   if (agora - wedge.ultimo > 80) { wedge.buf = ''; wedge.inicio = agora; }
   wedge.buf += e.key; wedge.ultimo = agora;
 });
-window.addEventListener('hashchange', () => { aoLerCodigo = null; });
 
 // Código lido que não está cadastrado
 function codigoNaoCadastrado(cod, aoVincular) {
@@ -559,6 +583,11 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
     toast(p.nome, 'ok');
   };
   if (!semLeitor) aoLerCodigo = (cod) => { if (container.isConnected) aplicarCodigo(cod); };
+  if (!semLeitor) aoAtualizarDados = () => {
+    if (!container.isConnected) return;
+    if (escolhido) { const n = S.produtos.find((x) => x.id === escolhido.id); if (n) { escolhido = n; desenhar(); } return; }
+    const i = container.querySelector('input'); if (i) i.dispatchEvent(new Event('input'));
+  };
   const desenhar = () => {
     if (escolhido) {
       const p = escolhido;
@@ -669,7 +698,7 @@ function comprovante(m) {
    SAÍDA
    ========================================================= */
 ROTAS.saida = async (el) => {
-  await recarregarProdutos();
+  await produtosRapido();
   const L = S.listas;
   el.innerHTML = `<div class="page-head"><h1>Registrar saída</h1></div>
   <form class="card" id="f-saida" novalidate>
@@ -744,7 +773,7 @@ ROTAS.saida = async (el) => {
    ENTRADA
    ========================================================= */
 ROTAS.entrada = async (el) => {
-  await recarregarProdutos();
+  await produtosRapido();
   const L = S.listas;
   el.innerHTML = `<div class="page-head"><h1>Registrar entrada</h1></div>
   <form class="card" id="f-ent" novalidate>
@@ -797,7 +826,7 @@ ROTAS.entrada = async (el) => {
    ESTOQUE (consulta) + ajuste de inventário
    ========================================================= */
 ROTAS.estoque = async (el) => {
-  await recarregarProdutos();
+  await produtosRapido();
   const tipos = [...new Set(S.produtos.map((p) => p.tipo))].sort();
   const nRepor = S.produtos.filter(precisaRepor).length;
   el.innerHTML = `<div class="page-head"><h1>Estoque</h1><button class="btn ${nRepor ? 'out' : ''}" id="es-repor">Lista de reposição${nRepor ? ` <span class="badge count" style="background:#fff;color:var(--out)">${nRepor}</span>` : ''}</button>${isAdmin() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
@@ -840,6 +869,12 @@ ROTAS.estoque = async (el) => {
     const b = e.target.closest('[data-aj]'); if (!b) return;
     ajusteInventario(S.produtos.find((p) => p.id === Number(b.dataset.aj)), () => desenhar());
   };
+  const botaoRepor = () => {
+    const n = S.produtos.filter(precisaRepor).length, bt = el.querySelector('#es-repor'); if (!bt) return;
+    bt.className = 'btn ' + (n ? 'out' : '');
+    bt.innerHTML = 'Lista de reposição' + (n ? ` <span class="badge count" style="background:#fff;color:var(--out)">${n}</span>` : '');
+  };
+  aoAtualizarDados = () => { if (el.isConnected) { desenhar(); botaoRepor(); } };
   desenhar();
 };
 
@@ -1005,6 +1040,8 @@ function linhaMov(m) {
    PAINEL (admin)
    ========================================================= */
 const graficos = [];
+// A biblioteca de gráficos (60 KB) só é baixada quando alguma tela precisa dela
+const garantirChart = () => (window.Chart ? Promise.resolve() : carregarScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js').catch(() => {}));
 function grafico(canvas, cfg) {
   if (!window.Chart || !canvas) { if (canvas) canvas.parentElement.innerHTML = '<p class="muted small">Gráfico indisponível (sem internet para carregar a biblioteca).</p>'; return; }
   const cs = getComputedStyle(document.documentElement);
@@ -1024,8 +1061,9 @@ const custoMov = (m) => Math.abs(m.qtd) * Number(m.custo_unitario || 0);
 ROTAS.painel = async (el) => {
   const hoje = hojeISO();
   const de = inicioMes(isoShift(inicioMes(hoje), { m: -5 }));
-  const [movs, pend] = await Promise.all([rpc('movimentacoes', { p_de: de, p_ate: hoje }), rpc('estornos', { p_status: 'pendente' }), recarregarProdutos()]);
-  S.pendentes = (pend || []).length;
+  const [movs] = await Promise.all([rpc('movimentacoes', { p_de: de, p_ate: hoje }), produtosRapido()]);
+  // pedidos de estorno: o número já veio ao abrir; confere de novo em segundo plano
+  rpc('estornos', { p_status: 'pendente' }).then((pend) => { const n = (pend || []).length; if (n !== S.pendentes) { S.pendentes = n; desenharNav(); } }).catch(() => {});
   const ativos = S.produtos.filter((p) => p.ativo);
   const baixos = ativos.filter((p) => p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo).sort((a, b) => a.saldo - b.saldo);
   const mes = inicioMes(hoje);
@@ -1059,6 +1097,7 @@ ROTAS.painel = async (el) => {
       </tbody></table></div>${baixos.length > 15 ? `<p class="muted small" style="margin-top:8px">E mais ${baixos.length - 15}. Veja o relatório de reposição.</p>` : ''}` : '<p class="muted">Nenhum item abaixo do mínimo. </p>'}</div>`;
 
   const bRepor = el.querySelector('#pn-repor'); if (bRepor) bRepor.onclick = () => tentar(listaReposicao);
+  await garantirChart();
   // gráfico por mês
   const meses = []; for (let i = 5; i >= 0; i--) meses.push(isoShift(inicioMes(hoje), { m: -i }).slice(0, 7));
   const porMes = groupBy((movs || []).filter(ehVenda), (m) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(m.data)).slice(0, 7));
@@ -1079,8 +1118,8 @@ ROTAS.painel = async (el) => {
    PRODUTOS (admin)
    ========================================================= */
 ROTAS.produtos = async (el) => {
-  await recarregarProdutos();
-  S.listas = (await rpc('listas')) || S.listas;
+  await produtosRapido();
+  rpc('listas').then((l) => { if (l) { S.listas = l; salvarCache(); } }).catch(() => {});
   const adm = isAdmin();
   const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
@@ -1109,6 +1148,7 @@ ROTAS.produtos = async (el) => {
   el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera(); if (c) abrirCodigo(c); };
   q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = limpaCodigo(q.value); if (produtoPorCodigo(v) || /^[0-9]{6,}$/.test(v)) abrirCodigo(v); } });
   el.querySelector('#pr-body').onclick = (e) => { const b = e.target.closest('[data-ed]'); if (b) formProduto(S.produtos.find((p) => p.id === Number(b.dataset.ed)), desenhar); };
+  aoAtualizarDados = () => { if (el.isConnected) desenhar(); };
   desenhar();
 };
 
@@ -1356,6 +1396,7 @@ ROTAS.relatorios = async (el) => {
     atual = montarRelatorio(tipo, { movs, prods, de, ate });
     atual.filtros = [F.tipo && 'Tipo: ' + F.tipo, F.tam && 'Tamanho: ' + F.tam, F.prod && 'Produto: ' + $('#rl-fprod').value, F.mot && 'Motivo: ' + F.mot, F.op && 'Operador: ' + F.op].filter(Boolean).join(' · ');
     atual.periodo = SEM_PERIODO.includes(tipo) ? 'Posição em ' + dOnly(hoje) : `${dOnly(de)} a ${dOnly(ate)}`;
+    await garantirChart();
     desenharRelatorio($('#relatorio-saida'), atual);
     $('#rl-csv').disabled = false; $('#rl-pdf').disabled = false;
   };
@@ -1699,13 +1740,24 @@ async function boot() {
   aplicarTema(storage.get('estoque_tema') || '');
   if (!CFG.SUPABASE_URL || !CFG.SUPABASE_KEY) return telaConfig();
   const t = storage.get('estoque_token');
+  const c = t ? lerCache() : null;
+  if (t && c) {
+    S.token = t; S.user = c.user; S.produtos = c.produtos; S.listas = c.listas || {}; S.pendentes = c.pendentes || 0; S.carregado = Date.now();
+    marcarAtividade();
+    render();
+    carregarBase().then(() => { if (!S.user) return; if (S.user.trocar_senha) render(); else { desenharNav(); avisarTela(); } })
+      .catch((e) => { if (S.user) toast(e.message, 'err'); });
+    return;
+  }
   if (t) {
     S.token = t;
     try {
-      S.user = await rpc('sessao');
+      S.user = {};
+      await carregarBase(); // valida a sessão e traz tudo numa consulta só
+      if (!S.user) return;
       marcarAtividade();
-      return iniciar();
-    } catch { S.token = null; S.user = null; storage.del('estoque_token'); }
+      return render();
+    } catch { if (S.token) { S.token = null; S.user = null; storage.del('estoque_token'); } else return; }
   }
   telaLogin();
 }
