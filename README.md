@@ -62,6 +62,13 @@ O sistema obriga a trocar a senha no primeiro acesso. Depois:
 3. **Entrada** → lance o estoque inicial (motivo *Compra de fornecedor* ou *Outro*).
 4. **Usuários** → crie os operadores (cada um cria a própria senha no primeiro acesso).
 
+### Próteses mamárias
+
+- **Cadastro** (Produtos › + Novo produto › Tipo *Prótese mamária*): marca, linha, formato, perfil, superfície e os **volumes em ml** — digite vários de uma vez (ex.: `250 275 300`) e cada volume vira um item. Grave o código de barras (GTIN) de cada volume, se quiser ler pela caixa. Próteses **não têm valores** (são pagas pela paciente) nem validade.
+- **Entrada**: escolha o volume e leia o **código de barras da caixa** — nº de série e lote são preenchidos sozinhos (padrão GS1). Uma linha por prótese. Motivo *Consignação recebida* para as consignadas.
+- **Saída**: marque (ou leia) a prótese exata, o **lado** (direita/esquerda) e a paciente. Motivos: *Implantada na paciente*, *Troca*, *Devolução ao fornecedor*, *Perda / avaria*.
+- **Tela Próteses**: estoque por volume com cada nº de série, e o histórico de implantadas — busca por paciente, nº de série ou lote (rastreabilidade).
+
 ### Liberação temporária de cadastro
 
 Em **Usuários**, no operador, toque em **Liberar cadastro** e escolha o prazo (fim do dia, 24 horas, 7 dias ou data/hora; no máximo 90 dias).

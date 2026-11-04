@@ -7,10 +7,16 @@
 
 const CFG = window.CONFIG || {};
 const TZ = 'America/Sao_Paulo';
-const MOTIVOS_ENTRADA = ['Compra de fornecedor', 'Devolução de paciente', 'Troca recebida', 'Outro'];
-const MOTIVOS_SAIDA = ['Venda à paciente', 'Incluído no pacote cirúrgico', 'Cortesia', 'Troca', 'Perda / avaria', 'Uso interno'];
+const MOTIVOS_ENTRADA = ['Compra de fornecedor', 'Consignação recebida', 'Devolução de paciente', 'Troca recebida', 'Outro'];
+const MOTIVOS_SAIDA = ['Venda à paciente', 'Incluído no pacote cirúrgico', 'Cortesia', 'Troca', 'Perda / avaria', 'Uso interno', 'Devolução ao fornecedor'];
+// Próteses mamárias
+const ehProtese = (tipo) => /^pr[óo]tese/i.test(tipo || '');
+const P_FORMATOS = ['Redonda', 'Anatômica'];
+const P_PERFIS = ['Perfil baixo', 'Perfil moderado', 'Perfil alto', 'Perfil extra alto', 'Perfil super alto'];
+const P_SUPERFICIES = ['Texturizada', 'Microtexturizada', 'Nanotexturizada', 'Lisa', 'Poliuretano'];
 const MOTIVOS_VENDA = ['Venda à paciente', 'Incluído no pacote cirúrgico'];
-const MOTIVOS_PACIENTE = ['Venda à paciente', 'Incluído no pacote cirúrgico', 'Cortesia', 'Troca'];
+const MOTIVOS_PACIENTE = ['Venda à paciente', 'Incluído no pacote cirúrgico', 'Cortesia', 'Troca', 'Implantada na paciente'];
+const MOTIVOS_SAIDA_PROTESE = ['Implantada na paciente', 'Troca', 'Devolução ao fornecedor', 'Perda / avaria'];
 const MOTIVOS_PERDA = ['Cortesia', 'Perda / avaria', 'Uso interno', 'Troca'];
 const IDLE_MIN = 30;
 
@@ -59,6 +65,7 @@ const unidade = (p, n) => (p && ehPorPar(p.tipo) ? (n === 1 ? 'par' : 'pares') :
 const unid = (p) => (p && ehPorPar(p.tipo) ? 'par(es)' : 'un.');
 function dicaTipo(tipo) {
   const t = String(tipo || '');
+  if (ehProtese(t)) return { modelo: 'Ex.: Lumina', dica: 'Prótese: cada unidade é controlada pelo nº de série e lote (registrados na Entrada). Sem valores: a prótese é paga pela paciente. Cadastre um item por volume — pode digitar vários volumes de uma vez.' };
   if (/^meia/i.test(t)) return { modelo: 'Ex.: Meia coxa antitrombo', dica: 'A clínica usa um modelo de meia: Meia coxa antitrombo. Para um tamanho novo, repita o mesmo Modelo e marque o tamanho.' };
   if (ehPorPar(t)) return { modelo: 'Ex.: Rígida reta 26 x 10 cm  ou  Flexível 26 x 10 cm', dica: 'Placa lateral vem em PAR: o estoque conta pares (1 = 1 par). No Modelo, escreva se é rígida ou flexível e a medida.', unico: true };
   if (/^placa/i.test(t)) return { modelo: 'Ex.: Coração rígida 35 x 28 cm  ou  Flexível oval', dica: 'No Modelo, escreva se a placa é rígida ou flexível e a medida. Tamanho: Único.', unico: true };
@@ -87,6 +94,7 @@ const ICON = {
   auditoria: '<path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>',
   config: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  proteses: '<path d="M4 15c0-4 3.5-8 8-8s8 4 8 8"/><path d="M4 15c1.5 2 4.5 3 8 3s6.5-1 8-3"/><circle cx="12" cy="12.5" r="1.2"/>',
   camera: '<path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16.5 8v8"/>',
   etiquetas: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>',
   sair: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
@@ -309,11 +317,11 @@ function telaTrocarSenha(obrigatoria) {
 
 /* ---------------- estrutura e navegação ---------------- */
 const NAV_OPER = [
-  ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'], ['hoje', 'Lançamentos'],
+  ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'],
 ];
 const NAV_ADMIN = [
   ['painel', 'Painel'], ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'],
-  ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'],
+  ['proteses', 'Próteses'], ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'],
   ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Configurações'],
 ];
 const ROTAS = {};
@@ -437,11 +445,55 @@ function carregarScript(url) {
 
 const limpaCodigo = (c) => String(c ?? '').trim().replace(/\s+/g, '');
 function produtoPorCodigo(cod) {
-  const c = limpaCodigo(cod); if (!c) return null;
+  const g = lerGS1(cod);
+  const c = limpaCodigo(g ? g.gtin : cod); if (!c) return null;
   const cu = c.toUpperCase();
+  const semZeros = (x) => (/^\d+$/.test(x) ? x.replace(/^0+/, '') : x); // EAN-13 = GTIN-14 com zero à esquerda
   return S.produtos.find((p) => p.codigo_barras && p.codigo_barras === c)
+    || S.produtos.find((p) => p.codigo_barras && /^\d+$/.test(c) && semZeros(p.codigo_barras) === semZeros(c))
     || S.produtos.find((p) => p.sku && p.sku.toUpperCase() === cu)
     || null;
+}
+
+// Código GS1 das embalagens (DataMatrix / GS1-128): (01) GTIN · (17) validade AAMMDD · (10) lote · (21) nº de série
+function lerGS1(txt) {
+  let s = String(txt ?? '').trim().replace(/^\](d2|C1|Q3|e0)/, '');
+  if (!s) return null;
+  const GS = '\x1d';
+  const out = {}; let incerto = false;
+  if (/^\(\d{2,4}\)/.test(s)) {
+    for (const m of s.matchAll(/\((\d{2,4})\)([^(]*)/g)) out[m[1]] = m[2].replace(/\x1d/g, '').trim();
+  } else {
+    s = s.replace(/[\x1d|]/g, GS); // alguns leitores trocam o separador por '|'
+    if (!/^(01|02)\d{14}/.test(s)) return null;
+    const fixo = { '00': 18, '01': 14, '02': 14, '11': 6, '12': 6, '13': 6, '15': 6, '16': 6, '17': 6, '20': 2 };
+    const variavel = ['10', '21', '22', '30', '37', '90', '91', '92', '240', '241', '250', '251'];
+    const temGS = s.includes(GS);
+    let i = 0;
+    while (i < s.length) {
+      if (s[i] === GS) { i++; continue; }
+      const ai2 = s.substr(i, 2), ai3 = s.substr(i, 3);
+      if (fixo[ai2]) { out[ai2] = s.substr(i + 2, fixo[ai2]); i += 2 + fixo[ai2]; continue; }
+      const ai = variavel.includes(ai3) ? ai3 : variavel.includes(ai2) ? ai2 : null;
+      if (!ai) break;
+      let fim = s.indexOf(GS, i + ai.length); if (fim < 0) fim = s.length;
+      let v = s.slice(i + ai.length, fim);
+      if (!temGS) { // sem separador: tenta achar onde começa o próximo campo
+        const m = v.match(/^(.{3,}?)(17\d{6}|21.{3,}|10.{2,})$/);
+        if (m && !(m[2].slice(0, 2) in out) && m[2].slice(0, 2) !== ai) { v = m[1]; fim = i + ai.length + m[1].length; incerto = true; }
+      }
+      out[ai] = v; i = fim;
+    }
+  }
+  const gtin = out['01'] || out['02'];
+  if (!gtin) return null;
+  let validade = null;
+  if (/^\d{6}$/.test(out['17'] || '')) {
+    const a = 2000 + Number(out['17'].slice(0, 2)), m = Number(out['17'].slice(2, 4)); let d = Number(out['17'].slice(4, 6));
+    if (!d) d = new Date(Date.UTC(a, m, 0)).getUTCDate(); // dia 00 = último dia do mês
+    validade = `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  return { gtin, lote: out['10'] || '', serie: out['21'] || '', validade, incerto };
 }
 
 function bip() {
@@ -571,16 +623,27 @@ const botaoCamera = (attr = 'data-cam') => `<button type="button" class="btn cam
 /* =========================================================
    SELETOR DE PRODUTO (usado em entrada, saída e ajustes)
    ========================================================= */
-function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = false } = {}) {
+function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = false, onUnidade, codigoSemProduto, bloquearTroca } = {}) {
   let escolhido = null;
   // aplica um código lido (câmera, leitor de mão ou digitado + Enter)
-  const aplicarCodigo = (cod) => {
-    const p = produtoPorCodigo(cod);
-    if (!p) { codigoNaoCadastrado(limpaCodigo(cod), (np) => { if (np) aplicarCodigo(np.sku); }); return; }
+  // onUnidade(produto, gs1|null, codigo): a tela trata série/lote/validade (próteses)
+  // codigoSemProduto(codigo, gs1): a tela tenta outra coisa (ex.: nº de série) antes do "não cadastrado"
+  const usarProduto = (p, g, cod) => {
     if (!p.ativo) { toast(`${p.nome} está inativo.`, 'err'); return; }
     if (exigeSaldo && p.saldo <= 0) { toast(`Sem estoque de ${p.nome}.`, 'err'); return; }
-    escolhido = p; desenhar(); onChange && onChange(p);
-    toast(p.nome, 'ok');
+    if (!escolhido || escolhido.id !== p.id) {
+      const msg = escolhido && bloquearTroca && bloquearTroca(p);
+      if (msg) { toast(msg, 'err'); return; }
+      escolhido = p; desenhar(); onChange && onChange(p); if (!g) toast(p.nome, 'ok');
+    }
+    if (onUnidade) onUnidade(p, g, cod);
+  };
+  const aplicarCodigo = async (cod) => {
+    const g = lerGS1(cod);
+    const p = produtoPorCodigo(cod);
+    if (p) { usarProduto(p, g, cod); return; }
+    if (codigoSemProduto && await codigoSemProduto(limpaCodigo(cod), g)) return;
+    codigoNaoCadastrado(limpaCodigo(g ? g.gtin : cod), (np) => { if (np) usarProduto(np, g, cod); });
   };
   if (!semLeitor) aoLerCodigo = (cod) => { if (container.isConnected) aplicarCodigo(cod); };
   if (!semLeitor) aoAtualizarDados = () => {
@@ -606,7 +669,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
       if (e.key !== 'Enter') return;
       e.preventDefault();
       const v = limpaCodigo(inp.value); if (!v) return;
-      if (produtoPorCodigo(v)) { aplicarCodigo(v); return; }
+      if (produtoPorCodigo(v) || lerGS1(v)) { aplicarCodigo(v); return; }
       const itens = [...res.querySelectorAll('.pick-item:not([disabled])')];
       if (itens.length === 1) { itens[0].click(); return; }
       if (/^[0-9]{6,}$/.test(v) && !semLeitor) aplicarCodigo(v); // parece código de barras
@@ -637,6 +700,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
   desenhar();
   return {
     get: () => escolhido,
+    lerCodigo: (cod) => aplicarCodigo(cod),
     set: (p) => { escolhido = p; desenhar(); onChange && onChange(p); },
     reset: () => { escolhido = null; desenhar(); onChange && onChange(null); },
   };
@@ -673,18 +737,21 @@ function comprovante(m) {
   if (saida) {
     if (m.paciente_nome) linhas.push(['Paciente', m.paciente_nome]);
     if (m.cirurgia) linhas.push(['Cirurgia', m.cirurgia + (m.data_cirurgia ? ' (' + dOnly(m.data_cirurgia) + ')' : '')]);
-    linhas.push(['Valor unitário', brl(m.valor_unitario)]);
-    if (Number(m.desconto)) linhas.push(['Desconto', '− ' + brl(m.desconto)]);
-    if (m.forma_pagamento) linhas.push(['Pagamento', m.forma_pagamento]);
+    if (!ehProtese(m.tipo_produto)) {
+      linhas.push(['Valor unitário', brl(m.valor_unitario)]);
+      if (Number(m.desconto)) linhas.push(['Desconto', '− ' + brl(m.desconto)]);
+      if (m.forma_pagamento) linhas.push(['Pagamento', m.forma_pagamento]);
+    }
   } else {
     if (m.fornecedor) linhas.push(['Fornecedor', m.fornecedor]);
     if (m.nota_fiscal) linhas.push(['Nota fiscal', m.nota_fiscal]);
   }
+  (m.unidades || []).forEach((u, i) => linhas.push([`Prótese ${i + 1}`, `Nº ${u.numero_serie}${u.lote ? ' · lote ' + u.lote : ''}${u.lado ? ' · ' + u.lado.toUpperCase() : ''}`]));
   if (m.observacao) linhas.push(['Observação', m.observacao]);
   linhas.push(['Registrado por', m.usuario], ['Saldo atual do item', nf(m.saldo_atual)]);
-  const mostraTotal = saida || isAdmin();
+  const mostraTotal = (saida || isAdmin()) && !ehProtese(m.tipo_produto);
   modal('Comprovante', `<div class="recibo">
-    <div class="r-head"><b>${esc(CFG.CLINICA || '')}</b><br>Comprovante de ${saida ? 'saída' : 'entrada'} de modelador</div>
+    <div class="r-head"><b>${esc(CFG.CLINICA || '')}</b><br>Comprovante de ${saida ? 'saída' : 'entrada'} de ${ehProtese(m.tipo_produto) ? 'prótese mamária' : 'produto'}</div>
     <dl>${linhas.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
     ${mostraTotal ? `<div class="r-total"><span>Total</span><span>${brl(m.valor_total)}</span></div>` : ''}
     ${saida && m.paciente_nome ? '<div class="assin">Assinatura da paciente</div>' : ''}
@@ -703,8 +770,10 @@ ROTAS.saida = async (el) => {
   el.innerHTML = `<div class="page-head"><h1>Registrar saída</h1></div>
   <form class="card" id="f-saida" novalidate>
     <div class="field"><span class="label">1. Produto</span><div id="pk"></div></div>
-    <div class="field"><label for="sd-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('sd-qtd')}</div>
-    <div class="field"><span class="label">3. Motivo</span>${pillsHtml('motivo', MOTIVOS_SAIDA, 'out')}</div>
+    <div class="field" id="sd-qtd-campo"><label for="sd-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('sd-qtd')}</div>
+    <div class="field hidden" id="sd-unid"><span class="label">2. Qual prótese? <span class="muted">Toque para marcar ou leia o código da caixa</span></span>
+      <div id="sd-lista" class="list"></div></div>
+    <div class="field"><span class="label">3. Motivo</span><div id="sd-motivos">${pillsHtml('motivo', MOTIVOS_SAIDA, 'out')}</div></div>
     <div id="sd-pac" class="hidden">
       <div class="field"><label for="sd-nome">Nome da paciente</label><input id="sd-nome" type="text" autocomplete="off" autocapitalize="words"></div>
       <div class="grid2">
@@ -712,17 +781,91 @@ ROTAS.saida = async (el) => {
         <div class="field"><label for="sd-dcir">Data da cirurgia <span class="muted">(opcional)</span></label><input id="sd-dcir" type="date"></div>
       </div>
     </div>
-    <div class="grid3">
+    <div class="grid3" id="sd-valores">
       <div class="field"><label for="sd-vu">Valor unitário (R$)</label><input id="sd-vu" type="text" inputmode="decimal"></div>
       <div class="field"><label for="sd-desc">Desconto (R$)</label><input id="sd-desc" type="text" inputmode="decimal" placeholder="0,00"></div>
       <div class="field"><label for="sd-pag">Forma de pagamento</label><select id="sd-pag">${optionsHtml(L.forma_pagamento, '', 'Selecione')}</select></div>
     </div>
-    <div class="total-line"><span>Total</span><span class="v" id="sd-total">${brl(0)}</span></div>
+    <div class="total-line" id="sd-total-linha"><span>Total</span><span class="v" id="sd-total">${brl(0)}</span></div>
     <div class="field"><label for="sd-obs">Observação <span class="muted">(opcional)</span></label><textarea id="sd-obs"></textarea></div>
     <button class="btn out block big" type="submit">Registrar saída</button>
   </form>`;
   const f = el.querySelector('#f-saida');
-  const pk = seletorProduto(f.querySelector('#pk'), { exigeSaldo: true, onChange: (p) => { f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo))); preencherValor(); calc(); } });
+  // próteses: unidades disponíveis do produto escolhido; marcadas = { id: lado }
+  let unids = [], marcadas = {};
+  const serial = () => { const p = pk && pk.get(); return !!(p && p.controla_serie); };
+  const quantidade = () => (serial() ? Object.keys(marcadas).length : parseInt(qtd.value, 10) || 0);
+  const vaiParaPaciente = () => MOTIVOS_PACIENTE.includes(motivo());
+  const venc = () => false; // próteses: validade indeterminada
+  const diasPara = (d) => Math.round((new Date(d + 'T12:00:00Z') - new Date(hojeISO() + 'T12:00:00Z')) / 864e5);
+  const seloValidade = (u) => {
+    if (!u.validade) return '<span class="badge">sem validade</span>';
+    const dd = diasPara(u.validade);
+    return dd < 0 ? '<span class="badge out">VENCIDA</span>' : dd <= 90 ? `<span class="badge warn">vence em ${dd} dia(s)</span>` : `<span class="badge in">val. ${esc(dOnly(u.validade))}</span>`;
+  };
+  const desenharUnids = () => {
+    const box = f.querySelector('#sd-lista'); const pac = vaiParaPaciente();
+    box.innerHTML = unids.length ? unids.map((u) => {
+      const bloq = pac && venc(u); const on = u.id in marcadas;
+      return `<div class="row-item unid ${on ? 'unid-on' : ''} ${bloq ? 'dim' : ''}" data-u="${u.id}">
+        <label class="check unid-check"><input type="checkbox" data-sel="${u.id}" ${on ? 'checked' : ''} ${bloq ? 'disabled' : ''}>
+          <span><b>Nº ${esc(u.numero_serie)}</b>${u.lote ? ' · lote ' + esc(u.lote) : ''}<br><span class="small muted">entrada ${esc(dOnly(u.entrada_data))}</span></span></label>
+        ${on && pac ? `<div class="pills lado">${['Direita', 'Esquerda'].map((l) => `<label class="pill"><input type="radio" name="lado-${u.id}" value="${l}" ${marcadas[u.id] === l ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>` : ''}
+      </div>`;
+    }).join('') : '<div class="empty">Nenhuma prótese deste produto em estoque.</div>';
+    f.querySelector('#sd-unid .label').firstChild.textContent = `2. Qual prótese? (${Object.keys(marcadas).length} marcada(s)) `;
+    calc();
+  };
+  const marcar = (id, on) => {
+    if (on) { const usados = Object.values(marcadas); marcadas[id] = !usados.includes('Direita') ? 'Direita' : !usados.includes('Esquerda') ? 'Esquerda' : ''; }
+    else delete marcadas[id];
+    desenharUnids();
+  };
+  f.querySelector('#sd-lista').addEventListener('change', (e) => {
+    const c = e.target.closest('[data-sel]'); if (c) { marcar(Number(c.dataset.sel), c.checked); return; }
+    const r = e.target.closest('input[type=radio]'); if (r) { marcadas[Number(r.name.split('-')[1])] = r.value; }
+  });
+  const carregarUnids = async (p) => {
+    unids = []; marcadas = {};
+    if (!p || !p.controla_serie) return desenharUnids();
+    f.querySelector('#sd-lista').innerHTML = '<div class="carregando">Carregando próteses…</div>';
+    unids = (await rpc('unidades', { p_produto: p.id, p_status: 'estoque' }).catch((e) => { toast(e.message, 'err'); return []; })) || [];
+    desenharUnids();
+  };
+  // ler o código de uma prótese marca a unidade certa (pelo nº de série)
+  const marcarPorSerie = (serie) => {
+    const u = unids.find((x) => x.numero_serie.toUpperCase() === String(serie).toUpperCase());
+    if (!u) return false;
+    if (vaiParaPaciente() && venc(u)) { toast(`A prótese nº ${u.numero_serie} está VENCIDA e não pode ir para paciente.`, 'err'); return true; }
+    if (!(u.id in marcadas)) marcar(u.id, true); bip(); toast(`Prótese nº ${u.numero_serie} marcada.`, 'ok'); return true;
+  };
+  const pk = seletorProduto(f.querySelector('#pk'), { exigeSaldo: true,
+    onUnidade: async (p, g) => { if (!p.controla_serie || !g || !g.serie) return; if (!unids.length) await carregarUnids(p); if (!marcarPorSerie(g.serie)) toast(`A prótese nº ${g.serie} não está no estoque.`, 'err'); },
+    codigoSemProduto: async (cod) => { // etiqueta só com o nº de série: procura a prótese em todo o estoque
+      if (serial() && marcarPorSerie(cod)) return true;
+      const r = (await rpc('unidades', { p_status: 'estoque', p_busca: cod }).catch(() => [])) || [];
+      const u = r.find((x) => x.numero_serie.toUpperCase() === cod.toUpperCase());
+      if (!u) return false;
+      const p = S.produtos.find((x) => x.id === u.produto_id); if (!p) return false;
+      if (!pk.get() || pk.get().id !== p.id) { pk.set(p); await carregarUnids(p); }
+      marcarPorSerie(cod); return true;
+    },
+    onChange: (p) => {
+      const pr = !!(p && p.controla_serie);
+      f.querySelector('#sd-qtd-campo').classList.toggle('hidden', pr);
+      f.querySelector('#sd-unid').classList.toggle('hidden', !pr);
+      f.querySelector('#sd-valores').classList.toggle('hidden', pr);
+      f.querySelector('#sd-total-linha').classList.toggle('hidden', pr);
+      // motivos conforme o produto (prótese: implantada, troca, devolução, perda)
+      const lista = pr ? MOTIVOS_SAIDA_PROTESE : MOTIVOS_SAIDA;
+      const atual = motivo();
+      f.querySelector('#sd-motivos').innerHTML = pillsHtml('motivo', lista, 'out');
+      if (atual && lista.includes(atual)) f.querySelector(`input[name=motivo][value="${atual}"]`).checked = true;
+      else f.querySelector('#sd-pac').classList.add('hidden');
+      ligarMotivos();
+      carregarUnids(p);
+      f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo))); preencherValor(); calc();
+    } });
   bindStepper(f);
   const motivo = () => (f.querySelector('input[name=motivo]:checked') || {}).value;
   const vu = f.querySelector('#sd-vu'), desc = f.querySelector('#sd-desc'), qtd = f.querySelector('#sd-qtd'), pag = f.querySelector('#sd-pag');
@@ -734,21 +877,25 @@ ROTAS.saida = async (el) => {
     vu.value = p && m ? money2(MOTIVOS_VENDA.includes(m) ? p.preco : 0) : (p ? money2(p.preco) : '');
   };
   const calc = () => {
-    const t = (parseNum(vu.value) || 0) * (parseInt(qtd.value, 10) || 0) - (parseNum(desc.value) || 0);
+    const t = (parseNum(vu.value) || 0) * quantidade() - (parseNum(desc.value) || 0);
     f.querySelector('#sd-total').textContent = brl(Math.max(t, 0));
   };
   f.addEventListener('input', calc);
-  f.querySelectorAll('input[name=motivo]').forEach((r) => r.addEventListener('change', () => {
+  const ligarMotivos = () => f.querySelectorAll('input[name=motivo]').forEach((r) => r.addEventListener('change', () => {
     const m = motivo();
     f.querySelector('#sd-pac').classList.toggle('hidden', !MOTIVOS_PACIENTE.includes(m));
     if (m === 'Incluído no pacote cirúrgico') pag.value = (L.forma_pagamento || []).includes('Incluso no pacote') ? 'Incluso no pacote' : pag.value;
-    if (['Cortesia', 'Perda / avaria', 'Uso interno', 'Troca'].includes(m)) pag.value = (L.forma_pagamento || []).includes('Sem cobrança') ? 'Sem cobrança' : '';
+    if (['Cortesia', 'Perda / avaria', 'Uso interno', 'Troca', 'Devolução ao fornecedor'].includes(m)) pag.value = (L.forma_pagamento || []).includes('Sem cobrança') ? 'Sem cobrança' : '';
+    if (serial()) desenharUnids();
     vuEditado = false; preencherValor(); calc();
   }));
+  ligarMotivos();
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const p = pk.get(); const m = motivo(); const q = parseInt(qtd.value, 10);
+    const p = pk.get(); const m = motivo(); const q = quantidade();
     if (!p) return toast('Escolha o produto.', 'err');
+    if (p.controla_serie && !q) return toast('Marque qual(is) prótese(s) está(ão) saindo.', 'err');
+    if (p.controla_serie && MOTIVOS_PACIENTE.includes(m) && Object.values(marcadas).some((l) => !l)) return toast('Marque o lado (direita ou esquerda) de cada prótese.', 'err');
     if (!q || q < 1) return toast('Informe a quantidade.', 'err');
     if (q > p.saldo) return toast(`Só há ${p.saldo} ${unidade(p, p.saldo)} em estoque.`, 'err');
     if (!m) return toast('Escolha o motivo da saída.', 'err');
@@ -760,9 +907,12 @@ ROTAS.saida = async (el) => {
       produto_id: p.id, quantidade: q, motivo: m, valor_unitario: v, desconto: d || 0, forma_pagamento: pag.value || null,
       paciente_nome: MOTIVOS_PACIENTE.includes(m) ? nome : null, cirurgia: f.querySelector('#sd-cir').value.trim() || null,
       data_cirurgia: f.querySelector('#sd-dcir').value || null, observacao: f.querySelector('#sd-obs').value.trim() || null,
+      unidades: p.controla_serie ? Object.entries(marcadas).map(([id, lado]) => ({ id: Number(id), lado: MOTIVOS_PACIENTE.includes(m) ? lado : null })) : undefined,
+      ...(p.controla_serie ? { valor_unitario: 0, desconto: 0, forma_pagamento: null } : {}),
     } }), f.querySelector('[type=submit]'));
     if (!res) return;
     toast('Saída registrada.', 'ok');
+    unids = []; marcadas = {};
     await recarregarProdutos();
     f.reset(); pk.reset(); vuEditado = false; f.querySelector('#sd-pac').classList.add('hidden'); calc();
     comprovante(res);
@@ -778,7 +928,12 @@ ROTAS.entrada = async (el) => {
   el.innerHTML = `<div class="page-head"><h1>Registrar entrada</h1></div>
   <form class="card" id="f-ent" novalidate>
     <div class="field"><span class="label">1. Produto</span><div id="pk"></div></div>
-    <div class="field"><label for="en-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('en-qtd')}</div>
+    <div class="field" id="en-qtd-campo"><label for="en-qtd">2. Quantidade <span class="qtd-par hidden">— em <b>pares</b> (1 = 1 par)</span></label>${stepperHtml('en-qtd')}</div>
+    <div class="field hidden" id="en-unid"><span class="label">2. Próteses que chegaram — uma linha por unidade</span>
+      <div class="info-box dica-tipo">Leia o <b>código de barras da caixa</b> (câmera ou leitor de mão): o nº de série e o lote são preenchidos sozinhos. Confira e leia a próxima.</div>
+      <div id="en-linhas" class="list"></div>
+      <div class="btn-row" style="margin-top:10px"><button type="button" class="btn" id="en-add">+ Digitar prótese</button><button type="button" class="btn cam" id="en-cam">${icon('camera')}<span>Ler próxima caixa</span></button></div>
+    </div>
     <div class="field"><span class="label">3. Motivo</span>${pillsHtml('motivo', MOTIVOS_ENTRADA, 'in')}</div>
     <div class="grid2">
       <div class="field"><label for="en-custo">Custo unitário (R$)</label><input id="en-custo" type="text" inputmode="decimal" placeholder="${isAdmin() ? '' : 'Deixe vazio para usar o custo cadastrado'}"></div>
@@ -793,8 +948,58 @@ ROTAS.entrada = async (el) => {
   </form>`;
   const f = el.querySelector('#f-ent');
   const custo = f.querySelector('#en-custo'), forn = f.querySelector('#en-forn'), qtd = f.querySelector('#en-qtd');
-  const calc = () => { const t = f.querySelector('#en-total'); if (t) t.textContent = brl((parseNum(custo.value) || 0) * (parseInt(qtd.value, 10) || 0)); };
-  const pk = seletorProduto(f.querySelector('#pk'), { onChange: (p) => {
+  // próteses: linhas {serie, lote, validade}
+  let linhas = [];
+  const serial = () => { const p = pk && pk.get(); return !!(p && p.controla_serie); };
+  const quantidade = () => (serial() ? linhas.length : parseInt(qtd.value, 10) || 0);
+  const calc = () => { const t = f.querySelector('#en-total'); if (t) t.textContent = brl((parseNum(custo.value) || 0) * quantidade()); };
+  const desenharLinhas = () => {
+    const box = f.querySelector('#en-linhas');
+    box.innerHTML = linhas.length ? linhas.map((l, i) => `<div class="row-item unid-linha" data-i="${i}">
+      <div class="main"><div class="grid2">
+        <div class="field" style="margin:0"><label>Nº de série</label><input type="text" data-k="serie" value="${esc(l.serie)}" autocomplete="off" spellcheck="false" autocapitalize="characters"></div>
+        <div class="field" style="margin:0"><label>Lote</label><input type="text" data-k="lote" value="${esc(l.lote)}" autocomplete="off" spellcheck="false" autocapitalize="characters"></div>
+      </div>${l.incerto ? '<div class="small" style="color:var(--warn);margin-top:6px">Confira lote e série: o leitor não separou os campos com certeza.</div>' : ''}</div>
+      <button type="button" class="x" data-del="${i}" aria-label="Remover">×</button></div>`).join('')
+      : '<div class="empty">Nenhuma prótese ainda. Leia o código da primeira caixa.</div>';
+    f.querySelector('#en-unid .label').textContent = `2. Próteses que chegaram — ${linhas.length} unidade(s)`;
+    calc();
+  };
+  const addLinha = async (l) => {
+    if (l.serie && linhas.some((x) => x.serie.toUpperCase() === l.serie.toUpperCase())) { toast(`A prótese nº ${l.serie} já está na lista.`, 'err'); return; }
+    if (l.serie) { // já foi registrada antes?
+      const r = (await rpc('unidades', { p_busca: l.serie }).catch(() => [])) || [];
+      const u = r.find((x) => x.numero_serie.toUpperCase() === l.serie.toUpperCase());
+      if (u) { toast(u.status === 'estoque' ? `A prótese nº ${u.numero_serie} já está no estoque (entrada em ${dOnly(u.entrada_data)}).` : `A prótese nº ${u.numero_serie} já foi registrada e saiu em ${dOnly(u.saida_data)}${u.paciente_nome ? ' (' + u.paciente_nome + ')' : ''}.`, 'err'); return; }
+    }
+    linhas.push({ serie: l.serie || '', lote: l.lote || '', incerto: !!l.incerto });
+    desenharLinhas(); bip();
+    if (!l.serie) { const ins = f.querySelectorAll('#en-linhas [data-k=serie]'); if (ins.length) ins[ins.length - 1].focus(); }
+  };
+  f.querySelector('#en-linhas').addEventListener('input', (e) => { const i = e.target.closest('[data-i]'); if (!i) return; linhas[Number(i.dataset.i)][e.target.dataset.k] = e.target.value.trim(); });
+  f.querySelector('#en-linhas').addEventListener('click', (e) => { const d = e.target.closest('[data-del]'); if (d) { linhas.splice(Number(d.dataset.del), 1); desenharLinhas(); } });
+  f.querySelector('#en-linhas').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+  f.querySelector('#en-add').onclick = () => addLinha({});
+  f.querySelector('#en-cam').onclick = async () => { const c = await lerCodigoCamera('Ler código da caixa'); if (c) pk.lerCodigo(c); };
+  const aoLerUnidade = (p, g, cod) => {
+    if (!p.controla_serie) return;
+    if (g) { addLinha({ serie: g.serie, lote: g.lote, incerto: g.incerto }); if (!g.serie) toast('O código não trouxe o nº de série: digite-o na linha.', ''); return; }
+    if (produtoPorCodigo(cod)) { addLinha({}); return; } // leu o código do produto: abre linha para digitar a série
+  };
+  const pk = seletorProduto(f.querySelector('#pk'), { onUnidade: aoLerUnidade,
+    bloquearTroca: (novo) => (linhas.length ? `Esta caixa é de outro produto (${novo.nome}). Registre primeiro as ${linhas.length} prótese(s) da lista, ou remova-as.` : null),
+    codigoSemProduto: async (cod) => { // com uma prótese escolhida, um código solto é o nº de série da etiqueta
+      if (!serial()) return false;
+      addLinha({ serie: cod }); return true;
+    },
+    onChange: (p) => {
+    const pr = !!(p && p.controla_serie);
+    f.querySelector('#en-qtd-campo').classList.toggle('hidden', pr);
+    f.querySelector('#en-custo').closest('.field').classList.toggle('hidden', pr);
+    const tot = f.querySelector('#en-total'); if (tot) tot.closest('.total-line').classList.toggle('hidden', pr);
+    f.querySelector('#en-unid').classList.toggle('hidden', !pr);
+    if (!pr) linhas = [];
+    desenharLinhas();
     f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo)));
     if (p && isAdmin() && p.custo !== undefined) custo.value = money2(p.custo);
     if (p && !forn.value) forn.value = p.fornecedor || '';
@@ -804,8 +1009,12 @@ ROTAS.entrada = async (el) => {
   f.addEventListener('input', calc);
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const p = pk.get(); const m = (f.querySelector('input[name=motivo]:checked') || {}).value; const q = parseInt(qtd.value, 10);
+    const p = pk.get(); const m = (f.querySelector('input[name=motivo]:checked') || {}).value; const q = quantidade();
     if (!p) return toast('Escolha o produto.', 'err');
+    if (p.controla_serie) {
+      if (!linhas.length) return toast('Leia ou digite pelo menos uma prótese.', 'err');
+      if (linhas.some((l) => !l.serie)) return toast('Falta o nº de série em alguma linha.', 'err');
+    }
     if (!q || q < 1) return toast('Informe a quantidade.', 'err');
     if (!m) return toast('Escolha o motivo da entrada.', 'err');
     const c = parseNum(custo.value);
@@ -813,9 +1022,11 @@ ROTAS.entrada = async (el) => {
     const res = await tentar(() => rpc('registrar_entrada', { p: {
       produto_id: p.id, quantidade: q, motivo: m, custo_unitario: c, fornecedor: forn.value.trim() || null,
       nota_fiscal: f.querySelector('#en-nf').value.trim() || null, observacao: f.querySelector('#en-obs').value.trim() || null,
+      unidades: p.controla_serie ? linhas.map((l) => ({ numero_serie: l.serie, lote: l.lote || null })) : undefined,
     } }), f.querySelector('[type=submit]'));
     if (!res) return;
     toast('Entrada registrada.', 'ok');
+    linhas = [];
     await recarregarProdutos();
     f.reset(); pk.reset(); calc();
     comprovante(res);
@@ -850,8 +1061,9 @@ ROTAS.estoque = async (el) => {
       const baixo = p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo;
       return `<div class="row-item ${p.ativo ? '' : 'dim'}"><div class="main">
         <div class="title">${esc(p.nome)} ${p.ativo ? '' : '<span class="badge">inativo</span>'} ${baixo && p.ativo ? '<span class="badge out">repor</span>' : ''}</div>
-        <div class="meta">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · mínimo ${nf(p.estoque_minimo)} · venda ${brl(p.preco)}${isAdmin() ? ' · custo ' + brl(p.custo) : ''}</div>
-        ${isAdmin() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
+        <div class="meta">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · mínimo ${nf(p.estoque_minimo)}${p.controla_serie ? '' : ` · venda ${brl(p.preco)}${isAdmin() ? ' · custo ' + brl(p.custo) : ''}`}</div>
+        ${p.controla_serie ? `<div class="row-actions"><a class="btn sm" href="#/proteses">Ver unidades (nº de série)</a></div>`
+          : isAdmin() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
       </div><div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(p.saldo)}</div><div class="small muted">${unidade(p, p.saldo)}</div></div></div>`;
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
@@ -900,6 +1112,89 @@ function ajusteInventario(p, depois) {
     },
   });
 }
+
+/* =========================================================
+   PRÓTESES MAMÁRIAS — estoque por unidade e rastreabilidade
+   ========================================================= */
+const diasAte = (d) => Math.round((new Date(d + 'T12:00:00Z') - new Date(hojeISO() + 'T12:00:00Z')) / 864e5);
+function seloVal(validade) {
+  if (!validade) return '<span class="badge">sem validade</span>';
+  const dd = diasAte(validade);
+  return dd < 0 ? `<span class="badge out">VENCIDA ${esc(dOnly(validade))}</span>`
+    : dd <= 90 ? `<span class="badge warn">vence em ${dd} dia(s) · ${esc(dOnly(validade))}</span>`
+    : `<span class="badge in">val. ${esc(dOnly(validade))}</span>`;
+}
+
+ROTAS.proteses = async (el) => {
+  await produtosRapido();
+  el.innerHTML = `<div class="page-head"><h1>Próteses mamárias</h1>
+      <a class="btn in" href="#/entrada">+ Entrada</a><a class="btn out" href="#/saida">Saída</a>
+      ${podeCadastrar() ? '<button class="btn" id="pt-novo">Cadastrar volume</button>' : ''}</div>
+    <div id="pt-alerta"></div>
+    <div class="tabs no-print" id="pt-tabs"><button data-t="estoque" class="on">Em estoque</button><button data-t="saiu">Implantadas / saídas</button></div>
+    <div class="toolbar no-print"><div class="field grow"><label for="pt-q">Buscar</label>
+      <div class="busca-linha"><input id="pt-q" type="search" placeholder="Nº de série, lote, paciente ou volume" enterkeyhint="search">${botaoCamera()}</div></div>
+      <button class="btn" id="pt-print">Imprimir</button></div>
+    <div id="relatorio-saida"></div>`;
+  const $ = (x) => el.querySelector(x);
+  let aba = 'estoque', dados = [];
+  const prots = () => S.produtos.filter((p) => p.controla_serie);
+  const alerta = () => {
+    const repor = prots().filter((p) => p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo);
+    $('#pt-alerta').innerHTML = repor.length ? `<div class="warn-box">Para repor: <b>${repor.map((p) => esc(p.tamanho)).join(', ')}</b> (no estoque mínimo ou abaixo).</div>` : '';
+  };
+  const desenhar = () => {
+    const out = $('#relatorio-saida');
+    const t = norm($('#pt-q').value);
+    if (aba === 'estoque') {
+      const lista = dados.filter((u) => !t || norm([u.numero_serie, u.lote, u.produto, u.tamanho, u.marca].join(' ')).includes(t));
+      const grupos = groupBy(lista, (u) => u.produto_id);
+      const semUnid = prots().filter((p) => p.ativo && !grupos[p.id] && !t);
+      out.innerHTML = `<p class="print-only"><b>${esc(CFG.CLINICA || '')}</b> — Próteses em estoque — ${esc(dOnly(new Date().toISOString()))}</p>
+        <p class="muted">${nf(lista.length)} prótese(s) em estoque</p>` + (Object.keys(grupos).length ? Object.entries(grupos)
+        .sort((a, b) => (parseInt(a[1][0].tamanho, 10) || 0) - (parseInt(b[1][0].tamanho, 10) || 0))
+        .map(([pid, us]) => {
+          const p = S.produtos.find((x) => x.id === Number(pid)) || {};
+          const baixo = p.estoque_minimo > 0 && us.length <= p.estoque_minimo;
+          return `<div class="card prot-grupo"><div class="prot-cab"><div><div class="prot-vol">${esc(us[0].tamanho)}</div>
+              <div class="muted small">${esc([us[0].marca, us[0].produto.replace(/ · \d+ ml.*$/, '').replace(/^Pr[óo]tese mamária /i, '')].filter(Boolean).join(' · '))}</div></div>
+              <div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(us.length)}</div><div class="small muted">unid.${baixo ? ' · repor' : ''}</div></div></div>
+            <div class="unid-lista">${us.map((u) => `<div class="unid-item"><div><b>Nº ${esc(u.numero_serie)}</b>${u.lote ? ' · lote ' + esc(u.lote) : ''}</div>
+              <div class="small muted">Entrada ${esc(dOnly(u.entrada_data))} · ${esc(u.entrada_motivo)}${u.fornecedor ? ' · ' + esc(u.fornecedor) : ''}${u.nota_fiscal ? ' · NF ' + esc(u.nota_fiscal) : ''}</div></div>`).join('')}
+            </div></div>`;
+        }).join('') : '<div class="empty">Nenhuma prótese em estoque' + (t ? ' com essa busca.' : '. Registre a chegada em <a href="#/entrada">Entrada</a>.') + '</div>')
+        + (semUnid.length ? `<p class="muted small" style="margin-top:12px">Sem estoque: ${semUnid.map((p) => esc(p.tamanho)).join(', ')}</p>` : '');
+    } else {
+      out.innerHTML = `<p class="print-only"><b>${esc(CFG.CLINICA || '')}</b> — Rastreabilidade de próteses — ${esc(dOnly(new Date().toISOString()))}</p>
+        <p class="muted">${nf(dados.length)} registro(s)${t ? ' para “' + esc($('#pt-q').value) + '”' : ' (últimos 1000)'}</p>` + (dados.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Data</th><th>Paciente / destino</th><th>Lado</th><th>Prótese</th><th>Nº de série</th><th>Lote</th></tr></thead><tbody>
+        ${dados.map((u) => `<tr><td class="nowrap">${esc(dOnly(u.data_cirurgia || u.saida_data))}</td>
+          <td>${u.paciente_nome ? `<b>${esc(u.paciente_nome)}</b>` : esc(u.saida_motivo)}${u.cirurgia ? `<div class="small muted">${esc(u.cirurgia)}</div>` : ''}<div class="small muted">${esc(u.saida_motivo)} · ${esc(u.usuario_saida || '')}</div></td>
+          <td><b>${esc(u.lado || '—')}</b></td><td>${esc(u.tamanho)}<div class="small muted">${esc(u.marca || '')}</div></td>
+          <td><b>${esc(u.numero_serie)}</b></td><td>${esc(u.lote || '—')}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty">Nada encontrado.</div>');
+    }
+  };
+  let pedido = 0;
+  const carregar = async () => {
+    const meu = ++pedido;
+    const busca = aba === 'saiu' ? $('#pt-q').value.trim() || null : null;
+    const r = (await rpc('unidades', { p_status: aba, p_busca: busca })) || [];
+    if (meu !== pedido) return;
+    dados = r; desenhar();
+  };
+  $('#pt-tabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; aba = b.dataset.t; el.querySelectorAll('#pt-tabs button').forEach((x) => x.classList.toggle('on', x === b)); $('#relatorio-saida').innerHTML = '<div class="carregando">Carregando…</div>'; tentar(carregar); };
+  let tq = null;
+  $('#pt-q').oninput = () => { if (aba === 'estoque') desenhar(); else { clearTimeout(tq); tq = setTimeout(() => tentar(carregar), 350); } };
+  const buscarCodigo = (cod) => { const g = lerGS1(cod); $('#pt-q').value = g && g.serie ? g.serie : limpaCodigo(cod); $('#pt-q').dispatchEvent(new Event('input')); };
+  aoLerCodigo = buscarCodigo;
+  el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera('Ler prótese'); if (c) buscarCodigo(c); };
+  $('#pt-print').onclick = () => { document.body.classList.add('imprimir-relatorio'); window.print(); setTimeout(() => document.body.classList.remove('imprimir-relatorio'), 500); };
+  const novoB = $('#pt-novo'); if (novoB) novoB.onclick = () => formProduto(null, () => { alerta(); desenhar(); }, { tipo: 'Prótese mamária' });
+  aoAtualizarDados = () => { if (el.isConnected) alerta(); };
+  alerta();
+  await carregar();
+};
 
 /* =========================================================
    LISTA DE REPOSIÇÃO (itens que chegaram no estoque mínimo)
@@ -1087,6 +1382,9 @@ ROTAS.painel = async (el) => {
       <div class="kpi"><div class="k-label">Lucro bruto do mês</div><div class="k-val">${brl(fat - cus)}</div><div class="k-sub">margem ${pct(fat ? (fat - cus) / fat : NaN)}</div></div>
       <div class="kpi"><div class="k-label">Entradas do mês</div><div class="k-val">${nf(sum(ent, (m) => m.qtd))}</div><div class="k-sub">${brl(sum(ent, (m) => m.valor_total))} em compras</div></div>
       <div class="kpi"><div class="k-label">Saídas do mês</div><div class="k-val">${nf(sum(sai, (m) => -m.qtd))}</div><div class="k-sub">todas as saídas</div></div>
+      ${S.produtos.some((p) => p.controla_serie) ? (() => { const pr = S.produtos.filter((p) => p.controla_serie); const venc = sum(pr, (p) => p.vencidas), v90 = sum(pr, (p) => p.vence_90);
+        void venc; void v90; const rep = pr.filter((p) => p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo).length;
+        return `<a class="kpi ${rep ? 'alert' : ''}" href="#/proteses" style="text-decoration:none;color:inherit"><div class="k-label">Próteses em estoque</div><div class="k-val">${nf(sum(pr, (p) => Math.max(p.saldo, 0)))}</div><div class="k-sub">${rep ? `${nf(rep)} volume(s) para repor` : 'ver por volume'}</div></a>`; })() : ''}
     </div>
     <div class="cols2">
       <div class="card"><h2>Faturamento e lucro — últimos 6 meses</h2><div class="chart-box"><canvas id="g-meses"></canvas></div></div>
@@ -1133,7 +1431,7 @@ ROTAS.produtos = async (el) => {
     const lista = S.produtos.filter((p) => inat.checked || p.ativo).filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.fornecedor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
     el.querySelector('#pr-body').innerHTML = lista.length ? lista.map((p) => `<tr class="${p.ativo ? '' : 'estornado'}">
       <td class="nowrap">${esc(p.sku)}${p.codigo_barras ? `<div class="small muted">${esc(p.codigo_barras)}</div>` : ''}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
-      ${adm ? `<td class="num">${brl(p.custo)}</td>` : ''}<td class="num">${brl(p.preco)}</td>${adm ? `<td class="num">${pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>` : ''}
+      ${adm ? `<td class="num">${p.controla_serie ? '—' : brl(p.custo)}</td>` : ''}<td class="num">${p.controla_serie ? '—' : brl(p.preco)}</td>${adm ? `<td class="num">${p.controla_serie ? '—' : pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>` : ''}
       <td class="num">${nf(p.estoque_minimo)}</td><td class="num"><b>${nf(p.saldo)}</b></td>
       ${adm ? `<td><button class="btn sm" data-ed="${p.id}">Editar</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${adm ? 8 : 5}" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>`;
   };
@@ -1158,22 +1456,38 @@ function formProduto(p, depois, inicial = {}) {
   modal(novo ? 'Novo produto' : 'Editar produto', `<form id="f-prod" novalidate>
     <div class="grid2">
       <div class="field"><label for="p-tipo">Tipo</label><select id="p-tipo" required>${optionsHtml(L.tipo, p.tipo, 'Selecione')}</select></div>
-      <div class="field"><label for="p-modelo">Modelo</label><input id="p-modelo" type="text" value="${esc(p.modelo)}" placeholder="${esc(dicaTipo(p.tipo).modelo)}" required></div>
+      <div class="field" id="p-modelo-campo"><label for="p-modelo">Modelo</label><input id="p-modelo" type="text" value="${esc(p.modelo)}" placeholder="${esc(dicaTipo(p.tipo).modelo)}" required></div>
     </div>
+    <div id="p-prot" class="hidden">${(() => {
+      const partes = String(p.modelo || '').split(' · ');
+      const pega = (lista) => partes.find((x) => lista.includes(x)) || '';
+      const linha = partes.filter((x) => ![...P_FORMATOS, ...P_PERFIS, ...P_SUPERFICIES].includes(x)).join(' · ');
+      return `<div class="grid2">
+        <div class="field"><label for="pp-linha">Linha / modelo</label><input id="pp-linha" type="text" value="${esc(ehProtese(p.tipo) ? linha : '')}" placeholder="Ex.: Lumina, Inspira, Ergonomix"></div>
+        <div class="field"><label for="pp-formato">Formato</label><select id="pp-formato">${optionsHtml(P_FORMATOS, pega(P_FORMATOS) || 'Redonda')}</select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="pp-perfil">Perfil</label><select id="pp-perfil">${optionsHtml(P_PERFIS, pega(P_PERFIS), 'Selecione')}</select></div>
+        <div class="field"><label for="pp-sup">Superfície</label><select id="pp-sup">${optionsHtml(P_SUPERFICIES, pega(P_SUPERFICIES), 'Selecione')}</select></div>
+      </div>
+      <div class="field"><label for="pp-vol">${novo ? 'Volumes (ml)' : 'Volume (ml)'}</label>
+        <input id="pp-vol" type="text" inputmode="numeric" value="${esc(novo ? '' : String(parseInt(p.tamanho, 10) || ''))}" placeholder="${novo ? 'Ex.: 250 275 300 325' : 'Ex.: 300'}">
+        <span class="hint">${novo ? 'Digite um ou vários volumes separados por espaço: cada volume vira um item de estoque.' : ''}</span></div>`;
+    })()}</div>
     <div class="info-box dica-tipo ${dicaTipo(p.tipo).dica ? '' : 'hidden'}" id="p-dica">${esc(dicaTipo(p.tipo).dica)}</div>
     <div>
     </div>
-    ${novo ? `<div class="field"><span class="label">Tamanhos</span><span class="hint">Marque um ou vários — cada tamanho vira um item de estoque.</span>
+    <div id="p-tams-bloco">${novo ? `<div class="field"><span class="label">Tamanhos</span><span class="hint">Marque um ou vários — cada tamanho vira um item de estoque.</span>
         <div class="pills">${tamanhos.map((t) => `<label class="pill"><input type="checkbox" name="tam" value="${esc(t)}"><span>${esc(t)}</span></label>`).join('')}</div></div>`
-      : `<div class="field"><label for="p-tam">Tamanho</label><select id="p-tam">${optionsHtml([...new Set([...tamanhos, p.tamanho])], p.tamanho)}</select></div>`}
+      : `<div class="field"><label for="p-tam">Tamanho</label><select id="p-tam">${optionsHtml([...new Set([...tamanhos, p.tamanho])], p.tamanho)}</select></div>`}</div>
     <div class="grid3">
-      <div class="field"><label for="p-cor">Cor</label><input id="p-cor" type="text" value="${esc(p.cor)}"></div>
+      <div class="field" id="p-cor-campo"><label for="p-cor">Cor</label><input id="p-cor" type="text" value="${esc(p.cor)}"></div>
       <div class="field"><label for="p-marca">Marca</label><input id="p-marca" type="text" value="${esc(p.marca)}"></div>
       <div class="field"><label for="p-forn">Fornecedor</label><input id="p-forn" type="text" list="dl-pforn" value="${esc(p.fornecedor)}">${datalist('dl-pforn', L.fornecedor)}</div>
     </div>
-    <div class="grid3">
-      <div class="field"><label for="p-custo">Custo (R$)${isAdmin() ? '' : ' <span class="muted">(se souber)</span>'}</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
-      <div class="field"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
+    <div class="grid3" id="p-valores">
+      <div class="field" id="p-custo-campo"><label for="p-custo">Custo (R$)${isAdmin() ? '' : ' <span class="muted">(se souber)</span>'}</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
+      <div class="field" id="p-preco-campo"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
       <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"><span class="hint">Quando o estoque chegar a esse número, aparece o aviso <b>repor</b>. Use 0 para não avisar.</span></div>
     </div>
     <p class="muted small" id="p-margem"></p>
@@ -1189,6 +1503,18 @@ function formProduto(p, depois, inicial = {}) {
   </form>`, {
     onMount(b, close) {
       const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par' : 'peça'} ${brl(v - c)}` : ''; };
+      const modoProtese = () => {
+        const pr = ehProtese(b.querySelector('#p-tipo').value);
+        b.querySelector('#p-prot').classList.toggle('hidden', !pr);
+        b.querySelector('#p-tams-bloco').classList.toggle('hidden', pr);
+        b.querySelector('#p-modelo-campo').classList.toggle('hidden', pr);
+        b.querySelector('#p-cor-campo').classList.toggle('hidden', pr);
+        b.querySelector('#p-custo-campo').classList.toggle('hidden', pr);
+        b.querySelector('#p-preco-campo').classList.toggle('hidden', pr);
+        b.querySelector('#p-margem').classList.toggle('hidden', pr);
+      };
+      modoProtese();
+      b.querySelector('#p-tipo').addEventListener('change', modoProtese);
       b.querySelector('#p-tipo').addEventListener('change', () => {
         const d = dicaTipo(b.querySelector('#p-tipo').value);
         b.querySelector('#p-modelo').placeholder = d.modelo;
@@ -1214,12 +1540,28 @@ function formProduto(p, depois, inicial = {}) {
         e.preventDefault();
         const val = (id) => b.querySelector(id).value.trim();
         const custo = parseNum(val('#p-custo')), preco = parseNum(val('#p-preco'));
+        const prot = ehProtese(val('#p-tipo'));
+        let volumes = [];
+        if (prot) {
+          b.querySelector('#p-modelo').value = [val('#pp-linha'), val('#pp-formato'), val('#pp-perfil'), val('#pp-sup')].filter(Boolean).join(' · ');
+          volumes = [...new Set((val('#pp-vol').match(/\d{2,4}/g) || []).map(Number))].filter((v) => v >= 50 && v <= 1500).sort((x, y) => x - y);
+          if (!volumes.length) return toast('Informe o volume da prótese em ml (ex.: 300).', 'err');
+          if (!novo && volumes.length > 1) return toast('Ao editar, informe um volume só.', 'err');
+          if (!val('#pp-perfil')) return toast('Escolha o perfil da prótese.', 'err');
+          b.querySelector('#p-cor').value = '';
+        }
         if (!val('#p-tipo') || !val('#p-modelo')) return toast('Preencha tipo e modelo.', 'err');
         if (Number.isNaN(custo) || Number.isNaN(preco)) return toast('Confira custo e preço.', 'err');
         const base = { tipo: val('#p-tipo'), modelo: val('#p-modelo'), cor: val('#p-cor'), marca: val('#p-marca'), fornecedor: val('#p-forn'),
           custo: custo || 0, preco: preco || 0, estoque_minimo: parseInt(val('#p-min'), 10) || 0, ativo: b.querySelector('#p-ativo').checked, observacoes: val('#p-obs'),
           codigo_barras: limpaCodigo(val('#p-cb')) || null };
         const ok = await tentar(async () => {
+          if (prot) {
+            if (novo && base.codigo_barras && volumes.length > 1) throw new Error('Com código de barras, informe um volume só (cada volume tem um código).');
+            if (novo) { for (const v of volumes) await rpc('salvar_produto', { p: { ...base, tamanho: v + ' ml' } }); return volumes.length; }
+            await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: volumes[0] + ' ml' } });
+            return 1;
+          }
           if (novo) {
             const tams = [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
             if (!tams.length) throw new Error('Marque pelo menos um tamanho.');
