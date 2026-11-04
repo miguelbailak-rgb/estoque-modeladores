@@ -116,6 +116,25 @@ create table if not exists estoque.estornos (
   criado_em        timestamptz not null default now()
 );
 
+-- PRÓTESES: cada unidade física com nº de série, lote e validade (rastreabilidade)
+alter table estoque.produtos add column if not exists controla_serie boolean not null default false;
+create table if not exists estoque.unidades (
+  id           bigserial primary key,
+  produto_id   int not null references estoque.produtos(id),
+  numero_serie text not null,
+  lote         text,
+  validade     date,
+  status       text not null default 'estoque' check (status in ('estoque','saiu','cancelada')),
+  entrada_mov  bigint not null references estoque.movimentacoes(id),
+  saida_mov    bigint references estoque.movimentacoes(id),
+  lado         text check (lado in ('Direita','Esquerda')),
+  criado_em    timestamptz not null default now()
+);
+create unique index if not exists unidades_serie_uk on estoque.unidades (upper(numero_serie)) where status <> 'cancelada';
+create index if not exists unidades_produto_idx on estoque.unidades (produto_id, status);
+create index if not exists unidades_entrada_idx on estoque.unidades (entrada_mov);
+create index if not exists unidades_saida_idx on estoque.unidades (saida_mov);
+
 create table if not exists estoque.historico_precos (
   id          serial primary key,
   produto_id  int not null references estoque.produtos(id),
@@ -163,6 +182,7 @@ alter table estoque.movimentacoes    enable row level security;
 alter table estoque.estornos         enable row level security;
 alter table estoque.historico_precos enable row level security;
 alter table estoque.auditoria        enable row level security;
+alter table estoque.unidades         enable row level security;
 
 -- ---------------------------------------------------------------------
 -- DADOS INICIAIS
@@ -175,7 +195,7 @@ insert into estoque.listas (categoria, valor, ordem) values
   ('tipo','Cinta',1), ('tipo','Body / macacão',2), ('tipo','Sutiã pós-cirúrgico',3),
   ('tipo','Faixa abdominal',4), ('tipo','Faixa de mento / face',5), ('tipo','Meia compressiva',6),
   ('tipo','Placa abdominal',7), ('tipo','Placa lateral (flancos)',8), ('tipo','Placa lombar',9),
-  ('tipo','Espuma',10), ('tipo','Outros',11),
+  ('tipo','Espuma',10), ('tipo','Prótese mamária',11), ('tipo','Outros',12),
   ('tamanho','PP',1), ('tamanho','P',2), ('tamanho','M',3), ('tamanho','G',4),
   ('tamanho','GG',5), ('tamanho','XG',6), ('tamanho','EXG',7), ('tamanho','Único',8),
   ('forma_pagamento','Pix',1), ('forma_pagamento','Dinheiro',2), ('forma_pagamento','Débito',3),
@@ -185,8 +205,11 @@ insert into estoque.listas (categoria, valor, ordem) values
   ('cirurgia','Mamoplastia redutora',4), ('cirurgia','Mamoplastia de aumento',5), ('cirurgia','Mastopexia',6),
   ('cirurgia','Mini abdominoplastia',7), ('cirurgia','Ritidoplastia',8), ('cirurgia','Lipo de papada',9),
   ('cirurgia','Braquioplastia',10), ('cirurgia','Cruroplastia',11), ('cirurgia','Ginecomastia',12),
-  ('cirurgia','Pós-bariátrica',13), ('cirurgia','Outra',14)
+  ('cirurgia','Pós-bariátrica',13), ('cirurgia','Outra',14), ('cirurgia','Mamoplastia de aumento com mastopexia',15),
+  ('cirurgia','Troca de prótese mamária',16)
 on conflict do nothing;
+
+update estoque.listas set ordem = 12 where categoria = 'tipo' and valor = 'Outros' and ordem < 12;
 
 -- ---------------------------------------------------------------------
 -- FUNÇÕES INTERNAS (não ficam expostas na API)
@@ -242,6 +265,9 @@ language sql stable set search_path = estoque, public as $$
   select coalesce(sum(qtd), 0)::int from estoque.movimentacoes where produto_id = p_produto;
 $$;
 
+create or replace function estoque._eh_protese(t text) returns boolean
+language sql immutable as $$ select coalesce(t, '') ~* '^pr[óo]tese' $$;
+
 create or replace function estoque._txt(p jsonb, k text) returns text
 language sql immutable as $$ select nullif(trim(p ->> k), '') $$;
 
@@ -270,7 +296,10 @@ returns jsonb language sql stable set search_path = estoque, public as $$
     'observacao', m.observacao, 'usuario', u.nome, 'usuario_id', m.usuario_id,
     'estornado', m.estornado, 'estorno_de', m.estorno_de,
     'estorno_pendente', exists (select 1 from estoque.estornos e where e.movimentacao_id = m.id and e.status = 'pendente'),
-    'saldo_atual', estoque._saldo(m.produto_id)
+    'saldo_atual', estoque._saldo(m.produto_id),
+    'unidades', (select jsonb_agg(jsonb_build_object('id', x.id, 'numero_serie', x.numero_serie, 'lote', x.lote,
+                   'validade', x.validade, 'lado', x.lado) order by x.lado nulls last, x.id)
+                 from estoque.unidades x where x.entrada_mov = m.id or x.saida_mov = m.id)
   ) || case when p_admin then jsonb_build_object('custo_unitario', m.custo_unitario) else '{}'::jsonb end
   from estoque.produtos p, estoque.usuarios u
   where p.id = m.produto_id and u.id = m.usuario_id
@@ -294,6 +323,15 @@ begin
   values ('estorno', 'Estorno de ' || m.tipo, m.produto_id, -m.qtd, m.custo_unitario, m.valor_unitario,
           m.desconto, m.valor_total, p_motivo, p_usuario, m.id)
   returning id into novo;
+  -- próteses: entrada estornada cancela as unidades; saída estornada devolve as unidades ao estoque
+  if m.tipo = 'entrada' then
+    if exists (select 1 from estoque.unidades where entrada_mov = m.id and status = 'saiu') then
+      raise exception 'Alguma prótese desta entrada já saiu do estoque. Estorne a saída dela primeiro.';
+    end if;
+    update estoque.unidades set status = 'cancelada' where entrada_mov = m.id;
+  else
+    update estoque.unidades set status = 'estoque', saida_mov = null, lado = null where saida_mov = m.id;
+  end if;
   update estoque.movimentacoes set estornado = true where id = m.id;
   return novo;
 end $$;
@@ -417,13 +455,18 @@ begin
       jsonb_build_object('id', p.id, 'sku', p.sku, 'codigo_barras', p.codigo_barras, 'tipo', p.tipo, 'modelo', p.modelo, 'marca', p.marca,
         'fornecedor', p.fornecedor, 'tamanho', p.tamanho, 'cor', p.cor, 'preco', p.preco,
         'estoque_minimo', p.estoque_minimo, 'ativo', p.ativo, 'observacoes', p.observacoes,
-        'nome', estoque._prod_nome(p), 'saldo', coalesce(s.saldo, 0))
+        'nome', estoque._prod_nome(p), 'saldo', coalesce(s.saldo, 0),
+        'controla_serie', p.controla_serie, 'validade_proxima', un.vmin, 'vencidas', coalesce(un.venc, 0),
+        'vence_90', coalesce(un.v90, 0))
       || case when adm then jsonb_build_object('custo', p.custo) else '{}'::jsonb end
       order by p.tipo, p.modelo, tl.ordem nulls last, p.tamanho, p.cor)
     from estoque.produtos p
     left join (select produto_id, sum(qtd)::int saldo from estoque.movimentacoes group by produto_id) s
            on s.produto_id = p.id
     left join estoque.listas tl on tl.categoria = 'tamanho' and tl.valor = p.tamanho
+    left join (select produto_id, min(validade) vmin, count(*) filter (where validade < current_date) venc,
+                      count(*) filter (where validade >= current_date and validade < current_date + 90) v90
+                 from estoque.unidades where status = 'estoque' group by produto_id) un on un.produto_id = p.id
     where adm or p.ativo), '[]'::jsonb);
 end $$;
 
@@ -431,17 +474,36 @@ end $$;
 create or replace function public.registrar_entrada(p_token text, p jsonb) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; pr estoque.produtos; q int; c numeric; m estoque.movimentacoes; mot text;
+        un jsonb; ns text; dup text;
 begin
   u := estoque._sessao(p_token);
   q := (p ->> 'quantidade')::int;
   mot := estoque._txt(p, 'motivo');
-  if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
-  if mot is null or mot not in ('Compra de fornecedor','Devolução de paciente','Troca recebida','Outro') then
+  if mot is null or mot not in ('Compra de fornecedor','Consignação recebida','Devolução de paciente','Troca recebida','Outro') then
     raise exception 'Escolha o motivo da entrada.';
   end if;
   select * into pr from estoque.produtos where id = (p ->> 'produto_id')::int for update;
   if not found or not pr.ativo then raise exception 'Produto não encontrado ou inativo.'; end if;
+  -- próteses: uma linha por unidade (nº de série obrigatório; lote e validade)
+  if pr.controla_serie then
+    if jsonb_typeof(p -> 'unidades') <> 'array' or jsonb_array_length(p -> 'unidades') = 0 then
+      raise exception 'Informe o número de série de cada prótese.';
+    end if;
+    q := jsonb_array_length(p -> 'unidades');
+    select string_agg(x, ', ') into dup from (
+      select upper(trim(e ->> 'numero_serie')) x from jsonb_array_elements(p -> 'unidades') e group by 1 having count(*) > 1) d;
+    if dup is not null then raise exception 'Número de série repetido nesta entrada: %.', dup; end if;
+    for un in select * from jsonb_array_elements(p -> 'unidades') loop
+      ns := trim(coalesce(un ->> 'numero_serie', ''));
+      if ns = '' then raise exception 'Falta o número de série de uma das próteses.'; end if;
+      if exists (select 1 from estoque.unidades where upper(numero_serie) = upper(ns) and status <> 'cancelada') then
+        raise exception 'A prótese nº de série % já está cadastrada.', ns;
+      end if;
+    end loop;
+  end if;
+  if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
   c := coalesce(estoque._num(p, 'custo_unitario'), pr.custo);
+  if pr.controla_serie then c := 0; end if;
   if c < 0 then raise exception 'Custo inválido.'; end if;
   insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, valor_total,
          fornecedor, nota_fiscal, observacao, usuario_id)
@@ -449,7 +511,14 @@ begin
           coalesce(estoque._txt(p,'fornecedor'), pr.fornecedor), estoque._txt(p,'nota_fiscal'),
           estoque._txt(p,'observacao'), u.id)
   returning * into m;
-  perform estoque._audit(u.id, 'entrada', jsonb_build_object('movimentacao', m.id, 'produto', pr.sku, 'qtd', q, 'motivo', mot));
+  if pr.controla_serie then
+    insert into estoque.unidades (produto_id, numero_serie, lote, validade, entrada_mov)
+    select pr.id, trim(e ->> 'numero_serie'), nullif(trim(coalesce(e ->> 'lote', '')), ''),
+           nullif(e ->> 'validade', '')::date, m.id
+    from jsonb_array_elements(p -> 'unidades') e;
+  end if;
+  perform estoque._audit(u.id, 'entrada', jsonb_build_object('movimentacao', m.id, 'produto', pr.sku, 'qtd', q, 'motivo', mot,
+                         'series', (select jsonb_agg(e ->> 'numero_serie') from jsonb_array_elements(coalesce(p -> 'unidades', '[]')) e)));
   return estoque._mov_json(m, u.perfil = 'admin');
 end $$;
 
@@ -457,37 +526,68 @@ end $$;
 create or replace function public.registrar_saida(p_token text, p jsonb) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; pr estoque.produtos; q int; vu numeric; d numeric; s int;
-        m estoque.movimentacoes; mot text; pac text;
+        m estoque.movimentacoes; mot text; pac text; un jsonb; x estoque.unidades; ids bigint[] := '{}';
 begin
   u := estoque._sessao(p_token);
   q := (p ->> 'quantidade')::int;
   mot := estoque._txt(p, 'motivo');
   pac := estoque._txt(p, 'paciente_nome');
-  if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
   if mot is null or mot not in ('Venda à paciente','Incluído no pacote cirúrgico','Cortesia','Troca',
-                                'Perda / avaria','Uso interno') then
+                                'Perda / avaria','Uso interno','Devolução ao fornecedor','Implantada na paciente') then
     raise exception 'Escolha o motivo da saída.';
   end if;
-  if mot in ('Venda à paciente','Incluído no pacote cirúrgico','Cortesia','Troca') and pac is null then
+  if mot in ('Venda à paciente','Incluído no pacote cirúrgico','Cortesia','Troca','Implantada na paciente') and pac is null then
     raise exception 'Informe o nome da paciente.';
   end if;
   select * into pr from estoque.produtos where id = (p ->> 'produto_id')::int for update;
   if not found or not pr.ativo then raise exception 'Produto não encontrado ou inativo.'; end if;
+  -- próteses: escolhe as unidades exatas (e o lado, quando vai para a paciente)
+  if pr.controla_serie then
+    if jsonb_typeof(p -> 'unidades') <> 'array' or jsonb_array_length(p -> 'unidades') = 0 then
+      raise exception 'Escolha qual(is) prótese(s) — pelo número de série.';
+    end if;
+    q := jsonb_array_length(p -> 'unidades');
+    for un in select * from jsonb_array_elements(p -> 'unidades') loop
+      select * into x from estoque.unidades where id = (un ->> 'id')::bigint for update;
+      if not found or x.produto_id <> pr.id or x.status <> 'estoque' then
+        raise exception 'A prótese escolhida não está disponível no estoque (nº %).', coalesce(x.numero_serie, un ->> 'id');
+      end if;
+      if (x.id = any(ids)) then raise exception 'A prótese nº % foi escolhida duas vezes.', x.numero_serie; end if;
+      ids := ids || x.id;
+      if mot in ('Venda à paciente','Incluído no pacote cirúrgico','Cortesia','Troca','Implantada na paciente') then
+        if x.validade is not null and x.validade < current_date then
+          raise exception 'A prótese nº % está VENCIDA (validade %). Não pode ser usada em paciente.', x.numero_serie, to_char(x.validade, 'DD/MM/YYYY');
+        end if;
+        if coalesce(un ->> 'lado', '') not in ('Direita','Esquerda') then
+          raise exception 'Informe o lado (direita ou esquerda) da prótese nº %.', x.numero_serie;
+        end if;
+      end if;
+    end loop;
+  end if;
+  if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
   s := estoque._saldo(pr.id);
   if q > s then
     raise exception 'Estoque insuficiente: há apenas % unidade(s) de %.', s, estoque._prod_nome(pr);
   end if;
   vu := coalesce(estoque._num(p, 'valor_unitario'), case when mot in ('Venda à paciente','Incluído no pacote cirúrgico') then pr.preco else 0 end);
   d  := coalesce(estoque._num(p, 'desconto'), 0);
+  if pr.controla_serie then vu := 0; d := 0; end if; -- próteses: pagas pela paciente, sem valores no estoque
   if vu < 0 or d < 0 then raise exception 'Valores não podem ser negativos.'; end if;
   if d > vu * q then raise exception 'O desconto não pode ser maior que o valor total.'; end if;
   insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, desconto,
          valor_total, forma_pagamento, paciente_nome, cirurgia, data_cirurgia, observacao, usuario_id)
-  values ('saida', mot, pr.id, -q, pr.custo, vu, d, round(vu * q - d, 2), estoque._txt(p,'forma_pagamento'),
+  values ('saida', mot, pr.id, -q, case when pr.controla_serie then 0 else pr.custo end, vu, d, round(vu * q - d, 2),
+          case when pr.controla_serie then null else estoque._txt(p,'forma_pagamento') end,
           pac, estoque._txt(p,'cirurgia'), nullif(p ->> 'data_cirurgia','')::date, estoque._txt(p,'observacao'), u.id)
   returning * into m;
+  if pr.controla_serie then
+    update estoque.unidades x2 set status = 'saiu', saida_mov = m.id,
+           lado = case when (e ->> 'lado') in ('Direita','Esquerda') then e ->> 'lado' end
+      from jsonb_array_elements(p -> 'unidades') e where x2.id = (e ->> 'id')::bigint;
+  end if;
   perform estoque._audit(u.id, 'saida', jsonb_build_object('movimentacao', m.id, 'produto', pr.sku, 'qtd', q,
-                         'motivo', mot, 'valor_total', m.valor_total));
+                         'motivo', mot, 'valor_total', m.valor_total,
+                         'series', (select jsonb_agg(numero_serie) from estoque.unidades where saida_mov = m.id)));
   return estoque._mov_json(m, u.perfil = 'admin');
 end $$;
 
@@ -552,12 +652,14 @@ begin
   pid := nullif(p ->> 'id','')::int;
   if pid is null then
     insert into estoque.produtos (sku, tipo, modelo, marca, fornecedor, tamanho, cor, custo, preco,
-           estoque_minimo, ativo, observacoes, codigo_barras)
+           estoque_minimo, ativo, observacoes, codigo_barras, controla_serie)
     values (coalesce(upper(estoque._txt(p,'sku')), 'TMP-' || gen_random_uuid()), estoque._txt(p,'tipo'),
             estoque._txt(p,'modelo'), estoque._txt(p,'marca'), estoque._txt(p,'fornecedor'), estoque._txt(p,'tamanho'),
-            estoque._txt(p,'cor'), coalesce(estoque._num(p,'custo'),0), coalesce(estoque._num(p,'preco'),0),
+            estoque._txt(p,'cor'),
+            case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'custo'),0) end,
+            case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
             coalesce((p ->> 'estoque_minimo')::int, 0), coalesce((p ->> 'ativo')::boolean, true),
-            estoque._txt(p,'observacoes'), cb)
+            estoque._txt(p,'observacoes'), cb, estoque._eh_protese(estoque._txt(p,'tipo')))
     returning * into novo;
     if novo.sku like 'TMP-%' then
       update estoque.produtos set sku = 'MOD-' || lpad(novo.id::text, 4, '0') where id = novo.id returning * into novo;
@@ -571,10 +673,19 @@ begin
     update estoque.produtos set
       sku = coalesce(upper(estoque._txt(p,'sku')), sku), tipo = estoque._txt(p,'tipo'), modelo = estoque._txt(p,'modelo'),
       marca = estoque._txt(p,'marca'), fornecedor = estoque._txt(p,'fornecedor'), tamanho = estoque._txt(p,'tamanho'),
-      cor = estoque._txt(p,'cor'), custo = coalesce(estoque._num(p,'custo'),0), preco = coalesce(estoque._num(p,'preco'),0),
+      cor = estoque._txt(p,'cor'),
+      custo = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'custo'),0) end,
+      preco = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
       estoque_minimo = coalesce((p ->> 'estoque_minimo')::int, 0), ativo = coalesce((p ->> 'ativo')::boolean, true),
-      observacoes = estoque._txt(p,'observacoes'), codigo_barras = cb
+      observacoes = estoque._txt(p,'observacoes'), codigo_barras = cb,
+      controla_serie = estoque._eh_protese(estoque._txt(p,'tipo'))
     where id = pid returning * into novo;
+    if ant.controla_serie and not novo.controla_serie and estoque._saldo(pid) <> 0 then
+      raise exception 'Este produto tem próteses em estoque controladas por nº de série; não dá para mudar o tipo.';
+    end if;
+    if novo.controla_serie and not ant.controla_serie and estoque._saldo(pid) <> 0 then
+      raise exception 'Para virar prótese, o produto precisa estar com estoque zero (as unidades entram com nº de série).';
+    end if;
     if novo.custo <> ant.custo or novo.preco <> ant.preco then
       insert into estoque.historico_precos (produto_id, custo_ant, custo_novo, preco_ant, preco_novo, usuario_id)
       values (pid, ant.custo, novo.custo, ant.preco, novo.preco, u.id);
@@ -609,6 +720,9 @@ begin
   if coalesce(trim(p_justificativa),'') = '' then raise exception 'A justificativa é obrigatória.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
   if not found then raise exception 'Produto não encontrado.'; end if;
+  if pr.controla_serie then
+    raise exception 'Próteses são controladas por número de série: use Entrada ou Saída escolhendo a unidade.';
+  end if;
   s := estoque._saldo(pr.id);
   if s = p_contada then raise exception 'A contagem é igual ao saldo do sistema (%). Nada a ajustar.', s; end if;
   insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, valor_total, observacao, usuario_id)
@@ -742,6 +856,35 @@ exception when unique_violation then
   raise exception 'Já existe um usuário com este nome de acesso.';
 end $$;
 
+-- Próteses: unidades em estoque / que saíram, com busca por nº de série, lote ou paciente
+create or replace function public.unidades(p_token text, p_produto int default null, p_status text default null, p_busca text default null)
+returns jsonb language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios; b text;
+begin
+  u := estoque._sessao(p_token);
+  b := nullif(trim(coalesce(p_busca, '')), '');
+  return coalesce((select jsonb_agg(j order by ordem1, ordem2) from (
+    select jsonb_build_object(
+      'id', x.id, 'produto_id', x.produto_id, 'produto', estoque._prod_nome(pr), 'marca', pr.marca, 'tamanho', pr.tamanho,
+      'sku', pr.sku, 'numero_serie', x.numero_serie, 'lote', x.lote, 'validade', x.validade, 'status', x.status, 'lado', x.lado,
+      'entrada_data', me.data, 'entrada_motivo', me.motivo, 'fornecedor', me.fornecedor, 'nota_fiscal', me.nota_fiscal,
+      'saida_id', ms.id, 'saida_data', ms.data, 'saida_motivo', ms.motivo, 'paciente_nome', ms.paciente_nome,
+      'cirurgia', ms.cirurgia, 'data_cirurgia', ms.data_cirurgia, 'usuario_saida', us.nome) j,
+      case when x.status = 'estoque' then 0 else 1 end ordem1,
+      case when x.status = 'estoque' then extract(epoch from coalesce(x.validade, '2999-01-01'::date)) else -extract(epoch from ms.data) end ordem2
+    from estoque.unidades x
+    join estoque.produtos pr on pr.id = x.produto_id
+    join estoque.movimentacoes me on me.id = x.entrada_mov
+    left join estoque.movimentacoes ms on ms.id = x.saida_mov
+    left join estoque.usuarios us on us.id = ms.usuario_id
+    where x.status <> 'cancelada'
+      and (p_produto is null or x.produto_id = p_produto)
+      and (p_status is null or x.status = p_status)
+      and (b is null or x.numero_serie ilike '%' || b || '%' or x.lote ilike '%' || b || '%'
+           or ms.paciente_nome ilike '%' || b || '%' or pr.sku ilike b)
+    order by 2, 3 limit 1000) t), '[]'::jsonb);
+end $$;
+
 -- Grava o código de barras lido num produto (admin; ou operador liberado, só em produto sem código)
 create or replace function public.vincular_codigo(p_token text, p_produto int, p_codigo text) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
@@ -837,6 +980,7 @@ begin
     'movimentacoes', (select coalesce(jsonb_agg(to_jsonb(x) order by id), '[]') from estoque.movimentacoes x),
     'estornos', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from estoque.estornos x),
     'historico_precos', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from estoque.historico_precos x),
+    'unidades', (select coalesce(jsonb_agg(to_jsonb(x) order by id), '[]') from estoque.unidades x),
     'auditoria', (select coalesce(jsonb_agg(to_jsonb(x) order by id), '[]') from estoque.auditoria x));
 end $$;
 
@@ -856,7 +1000,7 @@ begin
       'solicitar_estorno(text,bigint,text)','salvar_produto(text,jsonb)','historico_precos(text,int)',
       'ajustar_inventario(text,int,int,text)','estornos(text,text)','decidir_estorno(text,int,boolean,text)',
       'estornar(text,bigint,text)','movimentacoes(text,date,date)','usuarios(text)','salvar_usuario(text,jsonb)',
-      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
+      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','unidades(text,int,text,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
     loop
       execute format('revoke all on function public.%s from public', f);
       execute format('grant execute on function public.%s to anon, authenticated', f);
