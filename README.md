@@ -4,6 +4,7 @@ Controle de estoque de modeladores pós-operatórios da **Miguel Bailak Cirurgia
 Funciona no celular, tablet e computador, pela internet.
 
 - **Operador** (recepção/secretária): registra entradas e saídas e consulta o estoque — não vê custos nem margens.
+- **Gerente de estoque**: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque — **sem** custos, lucro, margem, faturamento, usuários, auditoria e backup.
 - **Administrador**: tudo do operador + painel, produtos e preços, ajustes de inventário, aprovação de estornos, relatórios, usuários, auditoria e backup.
 
 O site fica no **GitHub Pages** (grátis) e os dados ficam num banco **Supabase** (grátis), protegido por senha.

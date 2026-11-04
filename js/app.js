@@ -56,9 +56,13 @@ const parseNum = (v) => {
 const money2 = (n) => (n === null || n === undefined || n === '' ? '' : Number(n).toFixed(2).replace('.', ','));
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const isAdmin = () => S.user && S.user.perfil === 'admin';
+const isGerente = () => S.user && S.user.perfil === 'gerente';   // gerente de estoque: tudo do estoque, sem custos/lucro
+const isGestor = () => isAdmin() || isGerente();
+const PERFIS = { admin: 'Administrador', gerente: 'Gerente de estoque', operador: 'Operador' };
+const nomePerfil = (p) => PERFIS[p] || p;
 // admin, ou operador com liberação temporária para cadastrar produtos novos
-const liberadoAte = () => (S.user && S.user.perfil !== 'admin' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
-const podeCadastrar = () => isAdmin() || !!liberadoAte();
+const liberadoAte = () => (S.user && S.user.perfil === 'operador' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
+const podeCadastrar = () => isGestor() || !!liberadoAte();
 // Orientações por tipo de produto (aparecem no cadastro e nas telas de entrada/saída)
 const ehPorPar = (tipo) => /lateral|flanco/i.test(tipo || '') && /placa/i.test(tipo || '');
 const unidade = (p, n) => (p && ehPorPar(p.tipo) ? (n === 1 ? 'par' : 'pares') : (n === 1 ? 'unidade' : 'unidades'));
@@ -324,20 +328,25 @@ const NAV_ADMIN = [
   ['proteses', 'Próteses'], ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'],
   ['usuarios', 'Usuários'], ['auditoria', 'Auditoria'], ['config', 'Configurações'],
 ];
+const NAV_GERENTE = [
+  ['estoque', 'Estoque'], ['saida', 'Saída'], ['entrada', 'Entrada'], ['proteses', 'Próteses'],
+  ['hoje', 'Lançamentos'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'], ['relatorios', 'Relatórios'],
+];
 const ROTAS = {};
-const navAtual = () => (isAdmin() ? NAV_ADMIN : podeCadastrar() ? [...NAV_OPER, ['produtos', 'Produtos']] : NAV_OPER);
-const rotaAtual = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || (isAdmin() ? 'painel' : 'saida'));
+const navAtual = () => (isAdmin() ? NAV_ADMIN : isGerente() ? NAV_GERENTE : podeCadastrar() ? [...NAV_OPER, ['produtos', 'Produtos']] : NAV_OPER);
+const rotaInicial = () => (isAdmin() ? 'painel' : isGerente() ? 'estoque' : 'saida');
+const rotaAtual = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || rotaInicial());
 
 function shell() {
   const nav = navAtual();
   const r = rotaAtual();
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
-  const bottom = isAdmin() ? nav.slice(0, 4) : nav;
+  const bottom = nav.length > 6 ? nav.slice(0, 4) : nav;
   $app.innerHTML = `<div class="shell">
     <header class="topbar">
       <div class="brand"><div class="brand-mark">EM</div><div style="min-width:0"><div class="brand-title">Estoque de Modeladores</div><div class="brand-sub">${esc(CFG.CLINICA || '')}</div></div></div>
       <div class="spacer"></div>
-      <div class="user-chip"><div class="who"><b>${esc(S.user.nome)}</b><span>${isAdmin() ? 'Administrador' : 'Operador'}</span></div>
+      <div class="user-chip"><div class="who"><b>${esc(S.user.nome)}</b><span>${esc(nomePerfil(S.user.perfil))}</span></div>
         <button class="btn sm" id="b-senha" title="Trocar senha">Senha</button>
         <button class="btn sm" id="b-sair">${icon('sair')}Sair</button></div>
     </header>
@@ -359,10 +368,10 @@ function desenharNav() {
   const nav = navAtual();
   const r = rotaAtual();
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
-  const bottom = isAdmin() ? nav.slice(0, 4) : nav;
+  const bottom = nav.length > 6 ? nav.slice(0, 4) : nav;
   side.innerHTML = nav.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
   bot.innerHTML = bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}</a>`).join('')
-    + (isAdmin() ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : '');
+    + (nav.length > 6 ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : '');
   const mais = document.getElementById('b-mais');
   if (mais) mais.onclick = () => {
     const back = document.createElement('div'); back.className = 'drawer-back';
@@ -377,7 +386,7 @@ function desenharNav() {
 // Operador: confere se a liberação de cadastro mudou (ao usar o app, ao voltar para ele e quando o prazo vence)
 let ultimaVerificacao = 0, timerPrazo = null;
 async function verificarLiberacao(forcar = false) {
-  if (!S.user || isAdmin() || S.user.trocar_senha) return;
+  if (!S.user || S.user.perfil !== 'operador' || S.user.trocar_senha) return;
   if (!forcar && Date.now() - ultimaVerificacao < 60000) return;
   ultimaVerificacao = Date.now();
   const antes = podeCadastrar();
@@ -401,10 +410,10 @@ async function render() {
   if (S.user.trocar_senha) return telaTrocarSenha(true);
   const r = rotaAtual();
   // operador: a tela Produtos depende da liberação, então confere na hora; nas outras, em segundo plano
-  if (!isAdmin()) { if (r === 'produtos') await verificarLiberacao(true); else verificarLiberacao(); }
+  if (S.user.perfil === 'operador') { if (r === 'produtos') await verificarLiberacao(true); else verificarLiberacao(); }
   if (!S.user) return;
   const permitido = navAtual().some(([k]) => k === r);
-  if (!permitido) { location.hash = '#/' + (isAdmin() ? 'painel' : 'saida'); return; }
+  if (!permitido) { location.hash = '#/' + rotaInicial(); return; }
   aoLerCodigo = null; aoAtualizarDados = null; // a tela nova registra os seus
   shell();
   const el = document.getElementById('content');
@@ -604,7 +613,7 @@ function codigoNaoCadastrado(cod, aoVincular) {
       const pk = seletorProduto(b.querySelector('#vinc-pk'), { semLeitor: true, onChange: (p) => { okBtn.disabled = !p; } });
       okBtn.onclick = async () => {
         const p = pk.get(); if (!p) return;
-        if (p.codigo_barras && !isAdmin()) { toast('Este produto já tem outro código de barras. Somente o administrador pode trocar.', 'err'); return; }
+        if (p.codigo_barras && !isGestor()) { toast('Este produto já tem outro código de barras. Somente o administrador ou o gerente podem trocar.', 'err'); return; }
         if (p.codigo_barras && !(await confirmar('Trocar código', `Este produto já tem o código ${esc(p.codigo_barras)}. Trocar por ${esc(cod)}?`, { ok: 'Trocar' }))) return;
         const r = await tentar(() => rpc('vincular_codigo', { p_produto: p.id, p_codigo: cod }), okBtn);
         if (!r) return;
@@ -1002,6 +1011,7 @@ ROTAS.entrada = async (el) => {
     desenharLinhas();
     f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo)));
     if (p && isAdmin() && p.custo !== undefined) custo.value = money2(p.custo);
+    if (isGerente()) custo.closest('.field').classList.add('hidden');
     if (p && !forn.value) forn.value = p.fornecedor || '';
     calc();
   } });
@@ -1040,7 +1050,7 @@ ROTAS.estoque = async (el) => {
   await produtosRapido();
   const tipos = [...new Set(S.produtos.map((p) => p.tipo))].sort();
   const nRepor = S.produtos.filter(precisaRepor).length;
-  el.innerHTML = `<div class="page-head"><h1>Estoque</h1><button class="btn ${nRepor ? 'out' : ''}" id="es-repor">Lista de reposição${nRepor ? ` <span class="badge count" style="background:#fff;color:var(--out)">${nRepor}</span>` : ''}</button>${isAdmin() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
+  el.innerHTML = `<div class="page-head"><h1>Estoque</h1><button class="btn ${nRepor ? 'out' : ''}" id="es-repor">Lista de reposição${nRepor ? ` <span class="badge count" style="background:#fff;color:var(--out)">${nRepor}</span>` : ''}</button>${isGestor() ? '<a class="btn" href="#/produtos">Gerenciar produtos</a>' : ''}</div>
     <div class="toolbar">
       <div class="field grow"><label for="es-q">Buscar</label><div class="busca-linha"><input id="es-q" type="search" placeholder="Nome, tamanho, código…" enterkeyhint="search">${botaoCamera()}</div></div>
       <div class="field"><label for="es-tipo">Tipo</label><select id="es-tipo">${optionsHtml(tipos, '', 'Todos')}</select></div>
@@ -1051,7 +1061,7 @@ ROTAS.estoque = async (el) => {
   const q = el.querySelector('#es-q'), tipo = el.querySelector('#es-tipo'), low = el.querySelector('#es-low');
   const desenhar = () => {
     const termos = norm(q.value).split(/\s+/).filter(Boolean);
-    const lista = S.produtos.filter((p) => (isAdmin() ? true : p.ativo))
+    const lista = S.produtos.filter((p) => (isGestor() ? true : p.ativo))
       .filter((p) => !tipo.value || p.tipo === tipo.value)
       .filter((p) => !low.checked || (p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo))
       .filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.cor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
@@ -1063,7 +1073,7 @@ ROTAS.estoque = async (el) => {
         <div class="title">${esc(p.nome)} ${p.ativo ? '' : '<span class="badge">inativo</span>'} ${baixo && p.ativo ? '<span class="badge out">repor</span>' : ''}</div>
         <div class="meta">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · mínimo ${nf(p.estoque_minimo)}${p.controla_serie ? '' : ` · venda ${brl(p.preco)}${isAdmin() ? ' · custo ' + brl(p.custo) : ''}`}</div>
         ${p.controla_serie ? `<div class="row-actions"><a class="btn sm" href="#/proteses">Ver unidades (nº de série)</a></div>`
-          : isAdmin() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
+          : isGestor() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
       </div><div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(p.saldo)}</div><div class="small muted">${unidade(p, p.saldo)}</div></div></div>`;
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
@@ -1277,7 +1287,7 @@ async function listaReposicao() {
 ROTAS.hoje = async (el) => {
   el.innerHTML = `<div class="page-head"><h1>Lançamentos</h1></div>
     <div class="toolbar"><div class="field" style="max-width:240px"><label for="hj-d">Dia</label><input id="hj-d" type="date" value="${hojeISO()}" max="${hojeISO()}"></div>
-    <p class="muted small" style="flex:3 1 260px;margin:0 0 6px">${isAdmin() ? 'Todos os lançamentos do dia.' : 'Seus lançamentos do dia. Para corrigir um lançamento, peça o estorno — o administrador aprova.'}</p></div>
+    <p class="muted small" style="flex:3 1 260px;margin:0 0 6px">${isGestor() ? 'Todos os lançamentos do dia.' : 'Seus lançamentos do dia. Para corrigir um lançamento, peça o estorno — o administrador aprova.'}</p></div>
     <div id="hj-resumo"></div><div class="list" id="hj-lista"></div>`;
   const d = el.querySelector('#hj-d');
   let movs = [];
@@ -1325,8 +1335,8 @@ function linhaMov(m) {
     <div class="meta">${hora(m.data)} · ${esc(m.motivo)}${m.paciente_nome ? ' · ' + esc(m.paciente_nome) : ''}${m.observacao ? ' · ' + esc(m.observacao) : ''} · ${esc(m.usuario)}</div>
     <div class="row-actions">
       ${['entrada', 'saida'].includes(m.tipo) ? `<button class="btn sm" data-act="ver" data-id="${m.id}">Comprovante</button>` : ''}
-      ${podeEstornar && !isAdmin() && !m.estorno_pendente ? `<button class="btn sm" data-act="pedir" data-id="${m.id}">Pedir estorno</button>` : ''}
-      ${podeEstornar && isAdmin() ? `<button class="btn sm danger" data-act="estornar" data-id="${m.id}">Estornar</button>` : ''}
+      ${podeEstornar && !isGestor() && !m.estorno_pendente ? `<button class="btn sm" data-act="pedir" data-id="${m.id}">Pedir estorno</button>` : ''}
+      ${podeEstornar && isGestor() ? `<button class="btn sm danger" data-act="estornar" data-id="${m.id}">Estornar</button>` : ''}
     </div></div>
     <div class="side"><div class="saldo">${m.qtd > 0 ? '+' : ''}${nf(m.qtd)}</div><div class="small muted">${m.tipo === 'saida' || isAdmin() ? brl(m.valor_total) : ''}</div></div></div>`;
 }
@@ -1418,13 +1428,13 @@ ROTAS.painel = async (el) => {
 ROTAS.produtos = async (el) => {
   await produtosRapido();
   rpc('listas').then((l) => { if (l) { S.listas = l; salvarCache(); } }).catch(() => {});
-  const adm = isAdmin();
+  const adm = isAdmin(), gest = isGestor();
   const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
-    ${adm ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
+    ${gest ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
     <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
-    <label class="check ${adm ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
-    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${adm ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
+    <label class="check ${gest ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
+    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${gest ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
   const q = el.querySelector('#pr-q'), inat = el.querySelector('#pr-inat');
   const desenhar = () => {
     const termos = norm(q.value).split(/\s+/).filter(Boolean);
@@ -1433,13 +1443,13 @@ ROTAS.produtos = async (el) => {
       <td class="nowrap">${esc(p.sku)}${p.codigo_barras ? `<div class="small muted">${esc(p.codigo_barras)}</div>` : ''}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
       ${adm ? `<td class="num">${p.controla_serie ? '—' : brl(p.custo)}</td>` : ''}<td class="num">${p.controla_serie ? '—' : brl(p.preco)}</td>${adm ? `<td class="num">${p.controla_serie ? '—' : pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>` : ''}
       <td class="num">${nf(p.estoque_minimo)}</td><td class="num"><b>${nf(p.saldo)}</b></td>
-      ${adm ? `<td><button class="btn sm" data-ed="${p.id}">Editar</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${adm ? 8 : 5}" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>`;
+      ${gest ? `<td><button class="btn sm" data-ed="${p.id}">Editar</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${adm ? 8 : gest ? 6 : 5}" class="muted">Nenhum produto. Clique em “+ Novo produto”.</td></tr>`;
   };
   [q, inat].forEach((x) => x.addEventListener('input', desenhar));
   el.querySelector('#pr-novo').onclick = () => formProduto(null, desenhar);
   const abrirCodigo = (cod) => {
     const p = produtoPorCodigo(cod);
-    if (p) { inat.checked = inat.checked || !p.ativo; q.value = p.sku; desenhar(); if (adm) formProduto(p, desenhar); return; }
+    if (p) { inat.checked = inat.checked || !p.ativo; q.value = p.sku; desenhar(); if (gest) formProduto(p, desenhar); return; }
     codigoNaoCadastrado(limpaCodigo(cod), () => desenhar());
   };
   aoLerCodigo = abrirCodigo;
@@ -1494,12 +1504,12 @@ function formProduto(p, depois, inicial = {}) {
     <div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
       <div class="busca-linha"><input id="p-cb" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(p.codigo_barras)}" placeholder="Leia com a câmera ou o leitor de mão">${botaoCamera('data-cbcam')}</div>
       <span class="hint">${novo ? 'Se marcar vários tamanhos, deixe vazio e grave o código de cada tamanho depois (cada tamanho tem um código diferente).' : 'Cada tamanho/cor tem o seu próprio código de barras.'}</span></div>
-    <div class="grid2 ${isAdmin() ? '' : 'hidden'}">
+    <div class="grid2 ${isGestor() ? '' : 'hidden'}">
       <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
       <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
     </div>
     <div class="field"><label for="p-obs">Observações</label><textarea id="p-obs">${esc(p.observacoes)}</textarea></div>
-    <div class="btn-row end">${novo ? '' : '<button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
+    <div class="btn-row end">${novo || !isAdmin() ? '' : '<button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
   </form>`, {
     onMount(b, close) {
       const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par' : 'peça'} ${brl(v - c)}` : ''; };
@@ -1509,9 +1519,9 @@ function formProduto(p, depois, inicial = {}) {
         b.querySelector('#p-tams-bloco').classList.toggle('hidden', pr);
         b.querySelector('#p-modelo-campo').classList.toggle('hidden', pr);
         b.querySelector('#p-cor-campo').classList.toggle('hidden', pr);
-        b.querySelector('#p-custo-campo').classList.toggle('hidden', pr);
+        b.querySelector('#p-custo-campo').classList.toggle('hidden', pr || isGerente());
         b.querySelector('#p-preco-campo').classList.toggle('hidden', pr);
-        b.querySelector('#p-margem').classList.toggle('hidden', pr);
+        b.querySelector('#p-margem').classList.toggle('hidden', pr || !isAdmin());
       };
       modoProtese();
       b.querySelector('#p-tipo').addEventListener('change', modoProtese);
@@ -1692,6 +1702,7 @@ const RELATORIOS = [
   ['operador', 'Lançamentos por operador'], ['abc', 'Curva ABC'],
 ];
 const SEM_PERIODO = ['estoque', 'reposicao'];
+const RELATORIOS_FINANCEIROS = ['vendas', 'abc']; // só o administrador
 
 ROTAS.relatorios = async (el) => {
   await recarregarProdutos();
@@ -1700,7 +1711,7 @@ ROTAS.relatorios = async (el) => {
   const tams = [...new Set(S.produtos.map((p) => p.tamanho))];
   el.innerHTML = `<div class="page-head"><h1>Relatórios</h1></div>
   <div class="card no-print">
-    <div class="field"><label for="rl-tipo">Relatório</label><select id="rl-tipo">${RELATORIOS.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
+    <div class="field"><label for="rl-tipo">Relatório</label><select id="rl-tipo">${RELATORIOS.filter(([k]) => isAdmin() || !RELATORIOS_FINANCEIROS.includes(k)).map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
     <div id="rl-periodo"><div class="field"><span class="label">Período</span><div class="pills" id="rl-presets">
       ${[['hoje', 'Hoje'], ['mes', 'Este mês'], ['mesant', 'Mês passado'], ['90', 'Últimos 90 dias'], ['ano', 'Este ano']].map(([k, t]) => `<label class="pill"><input type="radio" name="pr" value="${k}" ${k === 'mes' ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
       <div class="grid2 keep"><div class="field"><label for="rl-de">De</label><input id="rl-de" type="date" value="${inicioMes(hoje)}"></div><div class="field"><label for="rl-ate">Até</label><input id="rl-ate" type="date" value="${hoje}"></div></div></div>
@@ -1736,6 +1747,7 @@ ROTAS.relatorios = async (el) => {
     const movs = cache.movs.filter((m) => okProd({ tipo: m.tipo_produto, tamanho: m.tamanho, nome: m.produto, sku: m.sku }) && (!F.mot || m.motivo === F.mot) && (!F.op || m.usuario === F.op));
     const prods = S.produtos.filter(okProd);
     atual = montarRelatorio(tipo, { movs, prods, de, ate });
+    if (!isAdmin()) semValores(atual);
     atual.filtros = [F.tipo && 'Tipo: ' + F.tipo, F.tam && 'Tamanho: ' + F.tam, F.prod && 'Produto: ' + $('#rl-fprod').value, F.mot && 'Motivo: ' + F.mot, F.op && 'Operador: ' + F.op].filter(Boolean).join(' · ');
     atual.periodo = SEM_PERIODO.includes(tipo) ? 'Posição em ' + dOnly(hoje) : `${dOnly(de)} a ${dOnly(ate)}`;
     await garantirChart();
@@ -1847,6 +1859,18 @@ function montarRelatorio(tipo, { movs, prods }) {
   return R;
 }
 
+// Gerente de estoque: tira dos relatórios tudo o que é dinheiro (custos, faturamento, lucro, margem)
+function semValores(R) {
+  R.kpis = R.kpis.filter(([k, v]) => !/R\$|margem|faturamento|custo|lucro/i.test(k + ' ' + v));
+  R.secoes.forEach((sec) => {
+    sec.cols = sec.cols.filter((c) => !['brl', 'pct'].includes(c.fmt));
+    if (sec.totais) sec.totais = sec.totais.filter((k) => sec.cols.some((c) => c.key === k));
+  });
+  if (R.grafico && R.grafico.moeda) R.grafico = null;
+  if (R.nota) R.nota = R.nota.replace(/ Valores a preço de custo\./, '');
+  return R;
+}
+
 function desenharRelatorio(out, R) {
   limparGraficos();
   out.innerHTML = `<div class="print-only"><b>${esc(CFG.CLINICA || '')}</b> — Estoque de Modeladores</div>
@@ -1908,7 +1932,7 @@ ROTAS.usuarios = async (el) => {
   const us = (await rpc('usuarios')) || [];
   el.innerHTML = `<div class="page-head"><h1>Usuários</h1><button class="btn primary" id="us-novo">+ Novo usuário</button></div>
     <div class="list">${us.map((u) => `<div class="row-item ${u.ativo ? '' : 'dim'}"><div class="main">
-      <div class="title">${esc(u.nome)} <span class="badge ${u.perfil === 'admin' ? 'acc' : ''}">${u.perfil === 'admin' ? 'Administrador' : 'Operador'}</span>
+      <div class="title">${esc(u.nome)} <span class="badge ${u.perfil === 'admin' ? 'acc' : u.perfil === 'gerente' ? 'in' : ''}">${esc(nomePerfil(u.perfil))}</span>
         ${u.ativo ? '' : '<span class="badge">desativado</span>'} ${u.bloqueado ? '<span class="badge out">bloqueado</span>' : ''} ${u.trocar_senha ? '<span class="badge warn">troca de senha pendente</span>' : ''}</div>
       <div class="meta">Usuário: <b>${esc(u.login)}</b> · desde ${dOnly(u.criado_em)}</div>
       ${u.cadastro_ate ? `<div class="liberado">Cadastro de produtos liberado até <b>${esc(dt(u.cadastro_ate))}</b></div>` : ''}
@@ -1994,8 +2018,12 @@ function formUsuario(u, depois) {
     ${novo ? '<div class="field"><label for="u-senha">Senha provisória</label><input id="u-senha" type="text" minlength="6" autocomplete="off" required><span class="hint">A pessoa cria a própria senha no primeiro acesso.</span></div>' : ''}
     <div class="field"><span class="label">Perfil</span><div class="pills">
       <label class="pill"><input type="radio" name="perfil" value="operador" ${u.perfil === 'operador' ? 'checked' : ''}><span>Operador</span></label>
+      <label class="pill"><input type="radio" name="perfil" value="gerente" ${u.perfil === 'gerente' ? 'checked' : ''}><span>Gerente de estoque</span></label>
       <label class="pill"><input type="radio" name="perfil" value="admin" ${u.perfil === 'admin' ? 'checked' : ''}><span>Administrador</span></label></div>
-      <span class="hint">Operador registra entradas/saídas e vê o estoque, sem custos. Administrador tem acesso total.</span></div>
+      <div class="perfis-ajuda">
+        <p><b>Operador</b>: registra entradas e saídas e consulta o estoque. Sem custos.</p>
+        <p><b>Gerente de estoque</b>: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque. <b>Não vê custos, lucro, margem nem faturamento</b>, e não mexe em usuários.</p>
+        <p><b>Administrador</b>: acesso total.</p></div></div>
     ${novo ? '' : `<label class="check"><input type="checkbox" id="u-ativo" ${u.ativo ? 'checked' : ''}> Ativo (pode entrar no sistema)</label>`}
     <div class="btn-row end" style="margin-top:16px"><button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form>`, {
     onMount(b, close) {

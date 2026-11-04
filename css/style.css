@@ -292,6 +292,10 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
 .empty { text-align: center; padding: 36px 16px; color: var(--ink-3); border: 1.5px dashed var(--line-2); border-radius: var(--radius); }
 .print-only { display: none; }
 
+/* ---------- Perfis ---------- */
+.perfis-ajuda { margin-top: 10px; font-size: .92rem; color: var(--ink-2); }
+.perfis-ajuda p { margin: 0 0 6px; }
+
 /* ---------- Próteses ---------- */
 .unid-linha { align-items: flex-start; }
 .unid-linha .grid3 { gap: 0 10px; }
