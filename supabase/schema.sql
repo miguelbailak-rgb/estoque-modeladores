@@ -42,6 +42,9 @@ create table if not exists estoque.usuarios (
   criado_em     timestamptz not null default now()
 );
 create unique index if not exists usuarios_login_uk on estoque.usuarios (lower(login));
+-- perfis: admin (tudo), gerente (estoque completo, sem custos/lucro), operador
+alter table estoque.usuarios drop constraint if exists usuarios_perfil_check;
+alter table estoque.usuarios add constraint usuarios_perfil_check check (perfil in ('admin','gerente','operador'));
 -- liberação temporária para operador cadastrar produtos novos (null = sem liberação)
 alter table estoque.usuarios add column if not exists cadastro_ate timestamptz;
 
@@ -241,8 +244,20 @@ end $$;
 
 create or replace function estoque._pode_cadastrar(u estoque.usuarios) returns boolean
 language sql stable as $$
-  select u.perfil = 'admin' or coalesce(u.cadastro_ate > now(), false)
+  select u.perfil in ('admin','gerente') or coalesce(u.cadastro_ate > now(), false)
 $$;
+
+-- administrador ou gerente de estoque
+create or replace function estoque._gestor(p_token text) returns estoque.usuarios
+language plpgsql set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios;
+begin
+  u := estoque._sessao(p_token);
+  if u.perfil not in ('admin','gerente') then
+    raise exception 'Acesso permitido somente ao administrador ou ao gerente de estoque.';
+  end if;
+  return u;
+end $$;
 
 create or replace function estoque._admin(p_token text) returns estoque.usuarios
 language plpgsql set search_path = estoque, extensions, public as $$
@@ -405,7 +420,7 @@ begin
   return jsonb_build_object('usuario', usr,
     'produtos', public.produtos(p_token),
     'listas', public.listas(p_token),
-    'pendentes', case when u.perfil = 'admin' then (select count(*) from estoque.estornos where status = 'pendente') else 0 end);
+    'pendentes', case when u.perfil in ('admin','gerente') then (select count(*) from estoque.estornos where status = 'pendente') else 0 end);
 end $$;
 
 create or replace function public.trocar_senha(p_token text, p_senha_atual text, p_senha_nova text)
@@ -467,7 +482,7 @@ begin
     left join (select produto_id, min(validade) vmin, count(*) filter (where validade < current_date) venc,
                       count(*) filter (where validade >= current_date and validade < current_date + 90) v90
                  from estoque.unidades where status = 'estoque' group by produto_id) un on un.produto_id = p.id
-    where adm or p.ativo), '[]'::jsonb);
+    where u.perfil in ('admin','gerente') or p.ativo), '[]'::jsonb);
 end $$;
 
 -- ENTRADA
@@ -503,6 +518,7 @@ begin
   end if;
   if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
   c := coalesce(estoque._num(p, 'custo_unitario'), pr.custo);
+  if u.perfil = 'gerente' then c := pr.custo; end if;
   if pr.controla_serie then c := 0; end if;
   if c < 0 then raise exception 'Custo inválido.'; end if;
   insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, valor_total,
@@ -603,7 +619,7 @@ begin
     from estoque.movimentacoes m
     where m.data >= (dia::timestamp at time zone 'America/Sao_Paulo')
       and m.data <  ((dia + 1)::timestamp at time zone 'America/Sao_Paulo')
-      and (u.perfil = 'admin' or m.usuario_id = u.id)), '[]'::jsonb);
+      and (u.perfil in ('admin','gerente') or m.usuario_id = u.id)), '[]'::jsonb);
 end $$;
 
 create or replace function public.solicitar_estorno(p_token text, p_mov bigint, p_motivo text) returns void
@@ -631,7 +647,7 @@ language plpgsql security definer set search_path = estoque, extensions, public 
 declare u estoque.usuarios; ant estoque.produtos; novo estoque.produtos; pid int; cb text; restr text; adm boolean;
 begin
   u := estoque._sessao(p_token);
-  adm := u.perfil = 'admin';
+  adm := u.perfil in ('admin','gerente');
   if not estoque._pode_cadastrar(u) then
     raise exception 'Cadastro de produtos não liberado para você. Peça ao administrador.';
   end if;
@@ -656,7 +672,7 @@ begin
     values (coalesce(upper(estoque._txt(p,'sku')), 'TMP-' || gen_random_uuid()), estoque._txt(p,'tipo'),
             estoque._txt(p,'modelo'), estoque._txt(p,'marca'), estoque._txt(p,'fornecedor'), estoque._txt(p,'tamanho'),
             estoque._txt(p,'cor'),
-            case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'custo'),0) end,
+            case when estoque._eh_protese(estoque._txt(p,'tipo')) or u.perfil = 'gerente' then 0 else coalesce(estoque._num(p,'custo'),0) end,
             case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
             coalesce((p ->> 'estoque_minimo')::int, 0), coalesce((p ->> 'ativo')::boolean, true),
             estoque._txt(p,'observacoes'), cb, estoque._eh_protese(estoque._txt(p,'tipo')))
@@ -674,7 +690,7 @@ begin
       sku = coalesce(upper(estoque._txt(p,'sku')), sku), tipo = estoque._txt(p,'tipo'), modelo = estoque._txt(p,'modelo'),
       marca = estoque._txt(p,'marca'), fornecedor = estoque._txt(p,'fornecedor'), tamanho = estoque._txt(p,'tamanho'),
       cor = estoque._txt(p,'cor'),
-      custo = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'custo'),0) end,
+      custo = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 when u.perfil = 'gerente' then ant.custo else coalesce(estoque._num(p,'custo'),0) end,
       preco = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
       estoque_minimo = coalesce((p ->> 'estoque_minimo')::int, 0), ativo = coalesce((p ->> 'ativo')::boolean, true),
       observacoes = estoque._txt(p,'observacoes'), codigo_barras = cb,
@@ -715,7 +731,7 @@ create or replace function public.ajustar_inventario(p_token text, p_produto int
 returns jsonb language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; pr estoque.produtos; s int; m estoque.movimentacoes;
 begin
-  u := estoque._admin(p_token);
+  u := estoque._gestor(p_token);
   if p_contada is null or p_contada < 0 then raise exception 'Informe a quantidade contada (zero ou mais).'; end if;
   if coalesce(trim(p_justificativa),'') = '' then raise exception 'A justificativa é obrigatória.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
@@ -731,17 +747,18 @@ begin
   returning * into m;
   perform estoque._audit(u.id, 'ajuste_inventario', jsonb_build_object('produto', pr.sku, 'saldo_sistema', s,
                          'contado', p_contada, 'justificativa', p_justificativa));
-  return estoque._mov_json(m, true);
+  return estoque._mov_json(m, u.perfil = 'admin');
 end $$;
 
 create or replace function public.estornos(p_token text, p_status text default 'pendente') returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios;
 begin
-  perform estoque._admin(p_token);
+  u := estoque._gestor(p_token);
   return coalesce((
     select jsonb_agg(jsonb_build_object('id', e.id, 'status', e.status, 'motivo', e.motivo, 'criado_em', e.criado_em,
              'solicitante', us.nome, 'decidido_em', e.decidido_em, 'decidido_por', ud.nome, 'obs_decisao', e.obs_decisao,
-             'mov', estoque._mov_json(m, true)) order by e.criado_em desc)
+             'mov', estoque._mov_json(m, u.perfil = 'admin')) order by e.criado_em desc)
     from estoque.estornos e
     join estoque.movimentacoes m on m.id = e.movimentacao_id
     join estoque.usuarios us on us.id = e.solicitado_por
@@ -753,7 +770,7 @@ create or replace function public.decidir_estorno(p_token text, p_id int, p_apro
 returns void language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; e estoque.estornos;
 begin
-  u := estoque._admin(p_token);
+  u := estoque._gestor(p_token);
   select * into e from estoque.estornos where id = p_id for update;
   if not found or e.status <> 'pendente' then raise exception 'Pedido não encontrado ou já decidido.'; end if;
   if p_aprovar then
@@ -771,7 +788,7 @@ create or replace function public.estornar(p_token text, p_mov bigint, p_motivo 
 language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios;
 begin
-  u := estoque._admin(p_token);
+  u := estoque._gestor(p_token);
   if coalesce(trim(p_motivo),'') = '' then raise exception 'Explique o motivo do estorno.'; end if;
   perform estoque._executar_estorno(p_mov, u.id, trim(p_motivo));
   update estoque.estornos set status = 'aprovado', decidido_por = u.id, decidido_em = now(),
@@ -783,8 +800,9 @@ end $$;
 -- Movimentações de um período (base de todos os relatórios)
 create or replace function public.movimentacoes(p_token text, p_de date, p_ate date) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare quem estoque.usuarios;
 begin
-  perform estoque._admin(p_token);
+  quem := estoque._gestor(p_token);
   if p_ate - p_de > 1100 then raise exception 'Escolha um período de até 3 anos.'; end if;
   -- consulta única (sem subconsultas por linha): rápida mesmo com muitos lançamentos
   return coalesce((
@@ -799,7 +817,7 @@ begin
       'observacao', m.observacao, 'usuario', u.nome, 'usuario_id', m.usuario_id,
       'estornado', m.estornado, 'estorno_de', m.estorno_de,
       'estorno_pendente', ep.movimentacao_id is not null,
-      'custo_unitario', m.custo_unitario) order by m.data desc)
+      'custo_unitario', case when quem.perfil = 'admin' then m.custo_unitario end) order by m.data desc)
     from estoque.movimentacoes m
     join estoque.produtos p on p.id = m.produto_id
     join estoque.usuarios u on u.id = m.usuario_id
@@ -825,7 +843,7 @@ begin
   u := estoque._admin(p_token);
   uid := nullif(p ->> 'id','')::int;
   if estoque._txt(p,'nome') is null or estoque._txt(p,'login') is null then raise exception 'Preencha nome e usuário.'; end if;
-  if coalesce(p ->> 'perfil','') not in ('admin','operador') then raise exception 'Perfil inválido.'; end if;
+  if coalesce(p ->> 'perfil','') not in ('admin','gerente','operador') then raise exception 'Perfil inválido.'; end if;
   if estoque._txt(p,'login') !~ '^[A-Za-z0-9._-]{3,30}$' then
     raise exception 'O usuário deve ter de 3 a 30 letras/números, sem espaços nem acentos.';
   end if;
@@ -898,7 +916,7 @@ begin
   if cb = '' then raise exception 'Código vazio.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
   if not found then raise exception 'Produto não encontrado.'; end if;
-  if pr.codigo_barras is not null and pr.codigo_barras <> cb and u.perfil <> 'admin' then
+  if pr.codigo_barras is not null and pr.codigo_barras <> cb and u.perfil not in ('admin','gerente') then
     raise exception 'Este produto já tem outro código de barras. Somente o administrador pode trocar.';
   end if;
   if exists (select 1 from estoque.produtos where (codigo_barras = cb or upper(sku) = upper(cb)) and id <> pr.id) then
@@ -917,7 +935,7 @@ begin
   u := estoque._admin(p_token);
   select * into alvo from estoque.usuarios where id = p_usuario for update;
   if not found then raise exception 'Usuário não encontrado.'; end if;
-  if alvo.perfil = 'admin' then raise exception 'O administrador já pode cadastrar produtos.'; end if;
+  if alvo.perfil <> 'operador' then raise exception 'Administrador e gerente de estoque já podem cadastrar produtos.'; end if;
   if p_ate is not null and p_ate <= now() then raise exception 'Escolha uma data e hora no futuro.'; end if;
   if p_ate is not null and p_ate > now() + interval '90 days' then raise exception 'A liberação pode ser de no máximo 90 dias.'; end if;
   update estoque.usuarios set cadastro_ate = p_ate where id = p_usuario;
