@@ -242,9 +242,10 @@ begin
   return u;
 end $$;
 
+-- cadastro e edição de produtos: todos os perfis (custo só o administrador)
 create or replace function estoque._pode_cadastrar(u estoque.usuarios) returns boolean
 language sql stable as $$
-  select u.perfil in ('admin','gerente') or coalesce(u.cadastro_ate > now(), false)
+  select u.perfil in ('admin','gerente','operador')
 $$;
 
 -- administrador ou gerente de estoque
@@ -518,7 +519,7 @@ begin
   end if;
   if q is null or q <= 0 then raise exception 'Informe uma quantidade maior que zero.'; end if;
   c := coalesce(estoque._num(p, 'custo_unitario'), pr.custo);
-  if u.perfil = 'gerente' then c := pr.custo; end if;
+  if u.perfil <> 'admin' then c := pr.custo; end if; -- só o administrador informa custo
   if pr.controla_serie then c := 0; end if;
   if c < 0 then raise exception 'Custo inválido.'; end if;
   insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, valor_total,
@@ -651,11 +652,10 @@ begin
   if not estoque._pode_cadastrar(u) then
     raise exception 'Cadastro de produtos não liberado para você. Peça ao administrador.';
   end if;
-  if not adm and nullif(p ->> 'id','') is not null then
-    raise exception 'Somente o administrador pode alterar produtos já cadastrados.';
-  end if;
-  if not adm then
-    p := (p - 'sku') || jsonb_build_object('ativo', true);
+  if not adm then -- operador: não troca o código interno nem inativa
+    p := p - 'sku';
+    if nullif(p ->> 'id','') is null then p := p || jsonb_build_object('ativo', true);
+    else p := p || jsonb_build_object('ativo', (select ativo from estoque.produtos where id = (p ->> 'id')::int)); end if;
   end if;
   cb := regexp_replace(coalesce(p ->> 'codigo_barras',''), '\s', '', 'g');
   if cb = '' then cb := null; end if;
@@ -672,7 +672,7 @@ begin
     values (coalesce(upper(estoque._txt(p,'sku')), 'TMP-' || gen_random_uuid()), estoque._txt(p,'tipo'),
             estoque._txt(p,'modelo'), estoque._txt(p,'marca'), estoque._txt(p,'fornecedor'), estoque._txt(p,'tamanho'),
             estoque._txt(p,'cor'),
-            case when estoque._eh_protese(estoque._txt(p,'tipo')) or u.perfil = 'gerente' then 0 else coalesce(estoque._num(p,'custo'),0) end,
+            case when estoque._eh_protese(estoque._txt(p,'tipo')) or u.perfil <> 'admin' then 0 else coalesce(estoque._num(p,'custo'),0) end,
             case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
             coalesce((p ->> 'estoque_minimo')::int, 0), coalesce((p ->> 'ativo')::boolean, true),
             estoque._txt(p,'observacoes'), cb, estoque._eh_protese(estoque._txt(p,'tipo')))
@@ -690,7 +690,7 @@ begin
       sku = coalesce(upper(estoque._txt(p,'sku')), sku), tipo = estoque._txt(p,'tipo'), modelo = estoque._txt(p,'modelo'),
       marca = estoque._txt(p,'marca'), fornecedor = estoque._txt(p,'fornecedor'), tamanho = estoque._txt(p,'tamanho'),
       cor = estoque._txt(p,'cor'),
-      custo = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 when u.perfil = 'gerente' then ant.custo else coalesce(estoque._num(p,'custo'),0) end,
+      custo = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 when u.perfil <> 'admin' then ant.custo else coalesce(estoque._num(p,'custo'),0) end,
       preco = case when estoque._eh_protese(estoque._txt(p,'tipo')) then 0 else coalesce(estoque._num(p,'preco'),0) end,
       estoque_minimo = coalesce((p ->> 'estoque_minimo')::int, 0), ativo = coalesce((p ->> 'ativo')::boolean, true),
       observacoes = estoque._txt(p,'observacoes'), codigo_barras = cb,
@@ -916,7 +916,7 @@ begin
   if cb = '' then raise exception 'Código vazio.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
   if not found then raise exception 'Produto não encontrado.'; end if;
-  if pr.codigo_barras is not null and pr.codigo_barras <> cb and u.perfil not in ('admin','gerente') then
+  if false and pr.codigo_barras is not null and pr.codigo_barras <> cb then
     raise exception 'Este produto já tem outro código de barras. Somente o administrador pode trocar.';
   end if;
   if exists (select 1 from estoque.produtos where (codigo_barras = cb or upper(sku) = upper(cb)) and id <> pr.id) then
