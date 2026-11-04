@@ -62,7 +62,7 @@ const PERFIS = { admin: 'Administrador', gerente: 'Gerente de estoque', operador
 const nomePerfil = (p) => PERFIS[p] || p;
 // admin, ou operador com liberação temporária para cadastrar produtos novos
 const liberadoAte = () => (S.user && S.user.perfil === 'operador' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
-const podeCadastrar = () => isGestor() || !!liberadoAte();
+const podeCadastrar = () => !!S.user; // todos cadastram e editam produtos (custo só o administrador)
 // Orientações por tipo de produto (aparecem no cadastro e nas telas de entrada/saída)
 const ehPorPar = (tipo) => /lateral|flanco/i.test(tipo || '') && /placa/i.test(tipo || '');
 const unidade = (p, n) => (p && ehPorPar(p.tipo) ? (n === 1 ? 'par' : 'pares') : (n === 1 ? 'unidade' : 'unidades'));
@@ -321,7 +321,7 @@ function telaTrocarSenha(obrigatoria) {
 
 /* ---------------- estrutura e navegação ---------------- */
 const NAV_OPER = [
-  ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'],
+  ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'], ['produtos', 'Produtos'],
 ];
 const NAV_ADMIN = [
   ['painel', 'Painel'], ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'],
@@ -333,7 +333,7 @@ const NAV_GERENTE = [
   ['hoje', 'Lançamentos'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'], ['relatorios', 'Relatórios'],
 ];
 const ROTAS = {};
-const navAtual = () => (isAdmin() ? NAV_ADMIN : isGerente() ? NAV_GERENTE : podeCadastrar() ? [...NAV_OPER, ['produtos', 'Produtos']] : NAV_OPER);
+const navAtual = () => (isAdmin() ? NAV_ADMIN : isGerente() ? NAV_GERENTE : NAV_OPER);
 const rotaInicial = () => (isAdmin() ? 'painel' : isGerente() ? 'estoque' : 'saida');
 const rotaAtual = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || rotaInicial());
 
@@ -386,6 +386,8 @@ function desenharNav() {
 // Operador: confere se a liberação de cadastro mudou (ao usar o app, ao voltar para ele e quando o prazo vence)
 let ultimaVerificacao = 0, timerPrazo = null;
 async function verificarLiberacao(forcar = false) {
+  return; // liberação temporária não é mais necessária: todos cadastram produtos
+  // eslint-disable-next-line no-unreachable
   if (!S.user || S.user.perfil !== 'operador' || S.user.trocar_senha) return;
   if (!forcar && Date.now() - ultimaVerificacao < 60000) return;
   ultimaVerificacao = Date.now();
@@ -410,7 +412,6 @@ async function render() {
   if (S.user.trocar_senha) return telaTrocarSenha(true);
   const r = rotaAtual();
   // operador: a tela Produtos depende da liberação, então confere na hora; nas outras, em segundo plano
-  if (S.user.perfil === 'operador') { if (r === 'produtos') await verificarLiberacao(true); else verificarLiberacao(); }
   if (!S.user) return;
   const permitido = navAtual().some(([k]) => k === r);
   if (!permitido) { location.hash = '#/' + rotaInicial(); return; }
@@ -1011,7 +1012,7 @@ ROTAS.entrada = async (el) => {
     desenharLinhas();
     f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo)));
     if (p && isAdmin() && p.custo !== undefined) custo.value = money2(p.custo);
-    if (isGerente()) custo.closest('.field').classList.add('hidden');
+    if (!isAdmin()) custo.closest('.field').classList.add('hidden');
     if (p && !forn.value) forn.value = p.fornecedor || '';
     calc();
   } });
@@ -1428,12 +1429,12 @@ ROTAS.painel = async (el) => {
 ROTAS.produtos = async (el) => {
   await produtosRapido();
   rpc('listas').then((l) => { if (l) { S.listas = l; salvarCache(); } }).catch(() => {});
-  const adm = isAdmin(), gest = isGestor();
+  const adm = isAdmin(), gest = true;
   const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
-    ${gest ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
+    ${gest || !ate ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
     <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
-    <label class="check ${gest ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
+    <label class="check ${isGestor() ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
     <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${gest ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
   const q = el.querySelector('#pr-q'), inat = el.querySelector('#pr-inat');
   const desenhar = () => {
@@ -1519,7 +1520,7 @@ function formProduto(p, depois, inicial = {}) {
         b.querySelector('#p-tams-bloco').classList.toggle('hidden', pr);
         b.querySelector('#p-modelo-campo').classList.toggle('hidden', pr);
         b.querySelector('#p-cor-campo').classList.toggle('hidden', pr);
-        b.querySelector('#p-custo-campo').classList.toggle('hidden', pr || isGerente());
+        b.querySelector('#p-custo-campo').classList.toggle('hidden', pr || !isAdmin());
         b.querySelector('#p-preco-campo').classList.toggle('hidden', pr);
         b.querySelector('#p-margem').classList.toggle('hidden', pr || !isAdmin());
       };
@@ -1935,11 +1936,9 @@ ROTAS.usuarios = async (el) => {
       <div class="title">${esc(u.nome)} <span class="badge ${u.perfil === 'admin' ? 'acc' : u.perfil === 'gerente' ? 'in' : ''}">${esc(nomePerfil(u.perfil))}</span>
         ${u.ativo ? '' : '<span class="badge">desativado</span>'} ${u.bloqueado ? '<span class="badge out">bloqueado</span>' : ''} ${u.trocar_senha ? '<span class="badge warn">troca de senha pendente</span>' : ''}</div>
       <div class="meta">Usuário: <b>${esc(u.login)}</b> · desde ${dOnly(u.criado_em)}</div>
-      ${u.cadastro_ate ? `<div class="liberado">Cadastro de produtos liberado até <b>${esc(dt(u.cadastro_ate))}</b></div>` : ''}
+
       <div class="row-actions"><button class="btn sm" data-ed="${u.id}">Editar</button><button class="btn sm" data-pw="${u.id}">Redefinir senha</button>
-        ${u.perfil === 'operador' && u.ativo ? (u.cadastro_ate
-          ? `<button class="btn sm" data-lib="${u.id}">Mudar prazo</button><button class="btn sm danger" data-fim="${u.id}">Encerrar liberação</button>`
-          : `<button class="btn sm" data-lib="${u.id}">${icon('produtos')}Liberar cadastro</button>`) : ''}</div>
+</div>
     </div></div>`).join('')}</div>`;
   el.querySelector('#us-novo').onclick = () => formUsuario(null, () => render());
   el.querySelector('.list').onclick = (e) => {
@@ -2021,7 +2020,7 @@ function formUsuario(u, depois) {
       <label class="pill"><input type="radio" name="perfil" value="gerente" ${u.perfil === 'gerente' ? 'checked' : ''}><span>Gerente de estoque</span></label>
       <label class="pill"><input type="radio" name="perfil" value="admin" ${u.perfil === 'admin' ? 'checked' : ''}><span>Administrador</span></label></div>
       <div class="perfis-ajuda">
-        <p><b>Operador</b>: registra entradas e saídas e consulta o estoque. Sem custos.</p>
+        <p><b>Operador</b>: registra entradas e saídas, consulta o estoque e cadastra/edita produtos. Sem custos.</p>
         <p><b>Gerente de estoque</b>: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque. <b>Não vê custos, lucro, margem nem faturamento</b>, e não mexe em usuários.</p>
         <p><b>Administrador</b>: acesso total.</p></div></div>
     ${novo ? '' : `<label class="check"><input type="checkbox" id="u-ativo" ${u.ativo ? 'checked' : ''}> Ativo (pode entrar no sistema)</label>`}

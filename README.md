@@ -3,7 +3,7 @@
 Controle de estoque de modeladores pós-operatórios da **Miguel Bailak Cirurgia Plástica**.
 Funciona no celular, tablet e computador, pela internet.
 
-- **Operador** (recepção/secretária): registra entradas e saídas e consulta o estoque — não vê custos nem margens.
+- **Operador** (recepção/secretária): registra entradas e saídas, consulta o estoque e **cadastra/edita produtos** — não vê custos nem margens.
 - **Gerente de estoque**: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque — **sem** custos, lucro, margem, faturamento, usuários, auditoria e backup.
 - **Administrador**: tudo do operador + painel, produtos e preços, ajustes de inventário, aprovação de estornos, relatórios, usuários, auditoria e backup.
 
@@ -70,19 +70,12 @@ O sistema obriga a trocar a senha no primeiro acesso. Depois:
 - **Saída**: marque (ou leia) a prótese exata, o **lado** (direita/esquerda) e a paciente. Motivos: *Implantada na paciente*, *Troca*, *Devolução ao fornecedor*, *Perda / avaria*.
 - **Tela Próteses**: estoque por volume com cada nº de série, e o histórico de implantadas — busca por paciente, nº de série ou lote (rastreabilidade).
 
-### Liberação temporária de cadastro
-
-Em **Usuários**, no operador, toque em **Liberar cadastro** e escolha o prazo (fim do dia, 24 horas, 7 dias ou data/hora; no máximo 90 dias).
-Enquanto durar, ele vê o menu **Produtos** e pode **cadastrar produtos novos** e **gravar o código de barras** de produtos que ainda não têm — além das entradas e saídas de sempre.
-Não pode alterar produtos existentes, preços, nem ver custos, painel, relatórios, usuários ou auditoria.
-A liberação termina sozinha no prazo; dá para encerrar antes com **Encerrar liberação**. Tudo fica na Auditoria.
-
 ### Leitor de código de barras
 
 - **Câmera**: toque em **Ler código** e aponte para o código de barras ou QR code. Na primeira vez o celular/iPad pede permissão para usar a câmera — toque em **Permitir**.
   Se negou sem querer: iPhone/iPad → Ajustes › Safari › Câmera › Permitir; Android → cadeado ao lado do endereço › Permissões › Câmera.
 - **Leitor de mão (USB ou Bluetooth)**: use um leitor no modo teclado (o padrão da maioria) que envia *Enter* no final. É só ler o código com a tela de Saída, Entrada, Estoque ou Produtos aberta. No iPad, pareie o leitor pelo Bluetooth como se fosse um teclado.
-- **Cadastrar o código de um produto**: leia o código na Entrada; se ele não estiver cadastrado, o administrador escolhe o produto e o código fica gravado. Ou em Produtos › Editar › *Código de barras do fabricante*.
+- **Cadastrar o código de um produto**: leia o código na Entrada; se ele não estiver cadastrado, escolha o produto e o código fica gravado. Ou em Produtos › Editar › *Código de barras do fabricante*.
 - Cada tamanho/cor tem o seu próprio código de barras.
 
 ### Instalar no celular como aplicativo
@@ -97,17 +90,17 @@ Abra o endereço no celular e:
 
 | Tela | Quem vê | O que faz |
 |---|---|---|
-| Leitor de código | todos | Botão **Ler código** (câmera do celular/iPad) e **leitor de mão** USB/Bluetooth nas telas de Saída, Entrada, Estoque e Produtos. Lê código de barras do fabricante (EAN) e QR code. Código desconhecido: o admin grava o código no produto na hora. |
+| Leitor de código | todos | Botão **Ler código** (câmera do celular/iPad) e **leitor de mão** USB/Bluetooth nas telas de Saída, Entrada, Estoque e Produtos. Lê código de barras do fabricante (EAN) e QR code. Código desconhecido: grava-se o código no produto na hora. |
 | Saída | todos | Venda à paciente, incluído no pacote cirúrgico, cortesia, troca, perda/avaria, uso interno. Não deixa sair mais do que há em estoque. Gera comprovante para imprimir. |
 | Entrada | todos | Compra de fornecedor, devolução de paciente, troca recebida, outro. |
 | Estoque | todos | Saldo de cada item, alerta de reposição. Admin vê custos e faz ajuste de inventário (contagem física, com justificativa). |
 | Lançamentos | todos | Lançamentos do dia. Operador vê só os seus e pode **pedir estorno**; admin estorna direto. |
 | Painel | admin | Valor do estoque (custo e venda), itens para repor, faturamento, lucro e margem do mês, gráficos. |
-| Produtos | admin | Cadastro, preços (com histórico de alterações), estoque mínimo, ativar/inativar. |
+| Produtos | todos | Cadastro e edição de produtos, preços, estoque mínimo e código de barras. Custo e histórico de preços só o admin; inativar só admin/gerente. |
 | Etiquetas | admin | Imprime etiquetas com QR code (folha A4, 3×7, 63,5×38,1 mm — Pimaco A4360) para modeladores sem código de barras. |
 | Estornos | admin | Aprovar ou recusar pedidos dos operadores. |
 | Relatórios | admin | Posição de estoque, extrato, vendas e margem, saídas por cirurgia, reposição, perdas/cortesias, por operador, curva ABC. Exporta para **Excel** e **PDF**. |
-| Usuários | admin | Criar, desativar, redefinir senha (também desbloqueia). **Liberar cadastro** temporário para um operador. |
+| Usuários | admin | Criar, desativar, redefinir senha (também desbloqueia). |
 | Auditoria | admin | Registro permanente de todas as ações. |
 | Configurações | admin | Listas editáveis, **backup completo**, tema claro/escuro. |
 
