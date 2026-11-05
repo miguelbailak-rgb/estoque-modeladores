@@ -81,6 +81,9 @@ create table if not exists estoque.produtos (
 -- código de barras do fabricante (EAN etc.), lido pela câmera
 alter table estoque.produtos add column if not exists codigo_barras text;
 create unique index if not exists produtos_codbarras_uk on estoque.produtos (codigo_barras) where codigo_barras is not null;
+-- produto apagado pelo administrador que já tinha histórico: some das listas, o histórico fica
+alter table estoque.produtos add column if not exists excluido boolean not null default false;
+alter table estoque.produtos add column if not exists excluido_em timestamptz;
 
 create table if not exists estoque.movimentacoes (
   id              bigserial primary key,
@@ -330,6 +333,9 @@ begin
   if m.estornado then raise exception 'Este lançamento já foi estornado.'; end if;
   if m.tipo not in ('entrada','saida') then raise exception 'Somente entradas e saídas podem ser estornadas.'; end if;
   perform 1 from estoque.produtos where id = m.produto_id for update;
+  if exists (select 1 from estoque.produtos where id = m.produto_id and excluido) then
+    raise exception 'Este produto foi apagado; o lançamento não pode ser estornado.';
+  end if;
   s := estoque._saldo(m.produto_id);
   if s - m.qtd < 0 then
     raise exception 'Não é possível estornar: o saldo ficaria negativo (saldo atual %).', s;
@@ -483,7 +489,7 @@ begin
     left join (select produto_id, min(validade) vmin, count(*) filter (where validade < current_date) venc,
                       count(*) filter (where validade >= current_date and validade < current_date + 90) v90
                  from estoque.unidades where status = 'estoque' group by produto_id) un on un.produto_id = p.id
-    where u.perfil in ('admin','gerente') or p.ativo), '[]'::jsonb);
+    where not p.excluido and (u.perfil in ('admin','gerente') or p.ativo)), '[]'::jsonb);
 end $$;
 
 -- ENTRADA
@@ -685,7 +691,7 @@ begin
     perform estoque._audit(u.id, 'produto_criado', to_jsonb(novo) || jsonb_build_object('por_liberacao', not adm));
   else
     select * into ant from estoque.produtos where id = pid for update;
-    if not found then raise exception 'Produto não encontrado.'; end if;
+    if not found or ant.excluido then raise exception 'Produto não encontrado.'; end if;
     update estoque.produtos set
       sku = coalesce(upper(estoque._txt(p,'sku')), sku), tipo = estoque._txt(p,'tipo'), modelo = estoque._txt(p,'modelo'),
       marca = estoque._txt(p,'marca'), fornecedor = estoque._txt(p,'fornecedor'), tamanho = estoque._txt(p,'tamanho'),
@@ -735,7 +741,7 @@ begin
   if p_contada is null or p_contada < 0 then raise exception 'Informe a quantidade contada (zero ou mais).'; end if;
   if coalesce(trim(p_justificativa),'') = '' then raise exception 'A justificativa é obrigatória.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
-  if not found then raise exception 'Produto não encontrado.'; end if;
+  if not found or pr.excluido then raise exception 'Produto não encontrado.'; end if;
   if pr.controla_serie then
     raise exception 'Próteses são controladas por número de série: use Entrada ou Saída escolhendo a unidade.';
   end if;
@@ -915,7 +921,7 @@ begin
   cb := regexp_replace(coalesce(p_codigo,''), '\s', '', 'g');
   if cb = '' then raise exception 'Código vazio.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
-  if not found then raise exception 'Produto não encontrado.'; end if;
+  if not found or pr.excluido then raise exception 'Produto não encontrado.'; end if;
   if false and pr.codigo_barras is not null and pr.codigo_barras <> cb then
     raise exception 'Este produto já tem outro código de barras. Somente o administrador pode trocar.';
   end if;
@@ -925,6 +931,38 @@ begin
   update estoque.produtos set codigo_barras = cb where id = pr.id;
   perform estoque._audit(u.id, 'codigo_vinculado', jsonb_build_object('produto', pr.sku, 'codigo', cb, 'anterior', pr.codigo_barras));
   return jsonb_build_object('id', pr.id, 'sku', pr.sku, 'codigo_barras', cb);
+end $$;
+
+-- APAGAR PRODUTO (somente o administrador)
+-- Sem nenhuma entrada/saída: apaga de vez. Com histórico: baixa o que houver em estoque,
+-- libera o código de barras e tira o produto de todas as listas — relatórios e auditoria continuam.
+create or replace function public.apagar_produto(p_token text, p_produto int, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = estoque, extensions, public as $$
+declare u estoque.usuarios; pr estoque.produtos; s int; m estoque.movimentacoes; nun int := 0;
+begin
+  u := estoque._admin(p_token);
+  if coalesce(trim(p_motivo),'') = '' then raise exception 'Informe o motivo.'; end if;
+  select * into pr from estoque.produtos where id = p_produto for update;
+  if not found or pr.excluido then raise exception 'Produto não encontrado.'; end if;
+  if not exists (select 1 from estoque.movimentacoes where produto_id = pr.id)
+     and not exists (select 1 from estoque.unidades where produto_id = pr.id) then
+    delete from estoque.historico_precos where produto_id = pr.id;
+    delete from estoque.produtos where id = pr.id;
+    perform estoque._audit(u.id, 'produto_apagado', to_jsonb(pr) || jsonb_build_object('motivo', trim(p_motivo), 'modo', 'apagado'));
+    return jsonb_build_object('modo', 'apagado', 'baixadas', 0);
+  end if;
+  s := estoque._saldo(pr.id);
+  if s <> 0 then
+    insert into estoque.movimentacoes (tipo, motivo, produto_id, qtd, custo_unitario, valor_unitario, valor_total, observacao, usuario_id)
+    values ('ajuste', 'Produto apagado', pr.id, -s, pr.custo, pr.custo, round(pr.custo * -s, 2), trim(p_motivo), u.id)
+    returning * into m;
+    update estoque.unidades set status = 'cancelada', saida_mov = m.id where produto_id = pr.id and status = 'estoque';
+    get diagnostics nun = row_count;
+  end if;
+  update estoque.produtos set excluido = true, excluido_em = now(), ativo = false, codigo_barras = null where id = pr.id;
+  perform estoque._audit(u.id, 'produto_apagado', jsonb_build_object('produto', pr.sku, 'nome', estoque._prod_nome(pr),
+          'motivo', trim(p_motivo), 'modo', 'arquivado', 'saldo_baixado', s, 'unidades_canceladas', nun, 'codigo_barras', pr.codigo_barras));
+  return jsonb_build_object('modo', 'arquivado', 'baixadas', s);
 end $$;
 
 -- Libera (ou encerra, com p_ate nulo) o cadastro temporário de produtos para um operador
@@ -1018,7 +1056,7 @@ begin
       'solicitar_estorno(text,bigint,text)','salvar_produto(text,jsonb)','historico_precos(text,int)',
       'ajustar_inventario(text,int,int,text)','estornos(text,text)','decidir_estorno(text,int,boolean,text)',
       'estornar(text,bigint,text)','movimentacoes(text,date,date)','usuarios(text)','salvar_usuario(text,jsonb)',
-      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','unidades(text,int,text,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
+      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','apagar_produto(text,int,text)','unidades(text,int,text,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
     loop
       execute format('revoke all on function public.%s from public', f);
       execute format('grant execute on function public.%s to anon, authenticated', f);
