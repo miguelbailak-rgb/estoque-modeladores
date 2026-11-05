@@ -597,6 +597,9 @@ document.addEventListener('keydown', (e) => {
   wedge.buf += e.key; wedge.ultimo = agora;
 });
 
+// volumes de prótese digitados ("250 275 300") → [250, 275, 300]
+const volumesDe = (txt) => [...new Set((String(txt || '').match(/\d{2,4}/g) || []).map(Number))].filter((v) => v >= 50 && v <= 1500).sort((x, y) => x - y);
+
 // Código lido que não está cadastrado
 function codigoNaoCadastrado(cod, aoVincular) {
   if (!podeCadastrar()) {
@@ -1502,9 +1505,12 @@ function formProduto(p, depois, inicial = {}) {
       <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"><span class="hint">Quando o estoque chegar a esse número, aparece o aviso <b>repor</b>. Use 0 para não avisar.</span></div>
     </div>
     <p class="muted small" id="p-margem"></p>
-    <div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
+    ${novo ? `<div class="field"><span class="label">Código de barras de cada tamanho <span class="muted">(opcional)</span></span>
+      <span class="hint">Leia a embalagem de cada tamanho com a câmera ou o leitor de mão — cada tamanho tem um código diferente. Pode deixar vazio e gravar depois.</span>
+      <div id="p-cbs" class="cb-lista"></div></div>`
+    : `<div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
       <div class="busca-linha"><input id="p-cb" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(p.codigo_barras)}" placeholder="Leia com a câmera ou o leitor de mão">${botaoCamera('data-cbcam')}</div>
-      <span class="hint">${novo ? 'Se marcar vários tamanhos, deixe vazio e grave o código de cada tamanho depois (cada tamanho tem um código diferente).' : 'Cada tamanho/cor tem o seu próprio código de barras.'}</span></div>
+      <span class="hint">Cada tamanho/cor tem o seu próprio código de barras.</span></div>`}
     <div class="grid2 ${isGestor() ? '' : 'hidden'}">
       <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
       <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
@@ -1530,16 +1536,56 @@ function formProduto(p, depois, inicial = {}) {
         const d = dicaTipo(b.querySelector('#p-tipo').value);
         b.querySelector('#p-modelo').placeholder = d.modelo;
         const box = b.querySelector('#p-dica'); box.textContent = d.dica; box.classList.toggle('hidden', !d.dica);
+        const u0 = b.querySelector('input[name=tam][value="Único"]');
+        if (!d.unico && u0 && u0.dataset.auto) { u0.checked = false; delete u0.dataset.auto; } // desfaz o "Único" marcado sozinho
         if (d.unico) {
           const u = b.querySelector('input[name=tam][value="Único"]');
-          if (u && ![...b.querySelectorAll('input[name=tam]:checked')].length) u.checked = true;
+          if (u && ![...b.querySelectorAll('input[name=tam]:checked')].length) { u.checked = true; u.dataset.auto = '1'; }
           const sel = b.querySelector('#p-tam'); if (sel && [...sel.options].some((o) => o.value === 'Único') && !p.id) sel.value = 'Único';
         }
         mg();
       });
       b.querySelector('#p-custo').oninput = mg; b.querySelector('#p-preco').oninput = mg; mg();
-      b.querySelector('#p-cb').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
-      b.querySelector('[data-cbcam]').onclick = async () => { const c = await lerCodigoCamera('Ler código de barras'); if (c) b.querySelector('#p-cb').value = c; };
+      const cbs = {}; // código de barras por tamanho (cadastro novo)
+      if (!novo) {
+        b.querySelector('#p-cb').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+        b.querySelector('[data-cbcam]').onclick = async () => { const c = await lerCodigoCamera('Ler código de barras'); if (c) b.querySelector('#p-cb').value = c; };
+      } else {
+        // um campo de código para cada tamanho (ou volume) marcado
+        const box = b.querySelector('#p-cbs');
+        let pendente = limpaCodigo(p.codigo_barras || ''); // código lido antes de abrir o cadastro
+        const chaves = () => (ehProtese(b.querySelector('#p-tipo').value)
+          ? volumesDe(b.querySelector('#pp-vol').value).map((v) => v + ' ml')
+          : [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value));
+        const proximo = (atual) => {
+          const ins = [...box.querySelectorAll('input[data-cbt]')];
+          const n = ins.slice(ins.indexOf(atual) + 1).find((i) => !i.value.trim());
+          if (n) n.focus(); else if (atual) atual.blur();
+        };
+        const desenharCbs = () => {
+          const ks = chaves();
+          if (pendente && ks.length) { if (!cbs[ks[0]]) cbs[ks[0]] = pendente; pendente = ''; }
+          box.innerHTML = ks.length ? ks.map((k) => `<div class="cb-linha"><span class="cb-tam">${esc(k)}</span>
+              <input data-cbt="${esc(k)}" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(cbs[k] || '')}" placeholder="Ler código do ${esc(k)}" aria-label="Código de barras do tamanho ${esc(k)}">
+              ${botaoCamera(`data-cbtcam="${esc(k)}"`)}</div>`).join('')
+            : `<p class="muted small">${pendente ? `Código lido: <b>${esc(pendente)}</b> — marque o tamanho dele acima.` : 'Marque o(s) tamanho(s) acima e aparece um campo de código para cada um.'}</p>`;
+          box.querySelectorAll('input[data-cbt]').forEach((i) => {
+            i.oninput = () => { cbs[i.dataset.cbt] = i.value; };
+            i.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); cbs[i.dataset.cbt] = i.value; if (i.value.trim()) proximo(i); } };
+          });
+          box.querySelectorAll('[data-cbtcam]').forEach((btn) => {
+            btn.onclick = async () => {
+              const k = btn.dataset.cbtcam; const c = await lerCodigoCamera(`Código de barras — ${k}`);
+              if (!c) return; const i = box.querySelector(`input[data-cbt="${CSS.escape(k)}"]`);
+              cbs[k] = c; if (i) { i.value = c; proximo(i); }
+            };
+          });
+        };
+        b.querySelectorAll('input[name=tam]').forEach((x) => x.addEventListener('change', desenharCbs));
+        b.querySelector('#pp-vol').addEventListener('input', desenharCbs);
+        b.querySelector('#p-tipo').addEventListener('change', desenharCbs);
+        desenharCbs();
+      }
       const h = b.querySelector('#p-hist');
       if (h) h.onclick = async () => {
         const hist = await tentar(() => rpc('historico_precos', { p_produto: p.id })); if (!hist) return;
@@ -1555,7 +1601,7 @@ function formProduto(p, depois, inicial = {}) {
         let volumes = [];
         if (prot) {
           b.querySelector('#p-modelo').value = [val('#pp-linha'), val('#pp-formato'), val('#pp-perfil'), val('#pp-sup')].filter(Boolean).join(' · ');
-          volumes = [...new Set((val('#pp-vol').match(/\d{2,4}/g) || []).map(Number))].filter((v) => v >= 50 && v <= 1500).sort((x, y) => x - y);
+          volumes = volumesDe(val('#pp-vol'));
           if (!volumes.length) return toast('Informe o volume da prótese em ml (ex.: 300).', 'err');
           if (!novo && volumes.length > 1) return toast('Ao editar, informe um volume só.', 'err');
           if (!val('#pp-perfil')) return toast('Escolha o perfil da prótese.', 'err');
@@ -1565,19 +1611,30 @@ function formProduto(p, depois, inicial = {}) {
         if (Number.isNaN(custo) || Number.isNaN(preco)) return toast('Confira custo e preço.', 'err');
         const base = { tipo: val('#p-tipo'), modelo: val('#p-modelo'), cor: val('#p-cor'), marca: val('#p-marca'), fornecedor: val('#p-forn'),
           custo: custo || 0, preco: preco || 0, estoque_minimo: parseInt(val('#p-min'), 10) || 0, ativo: b.querySelector('#p-ativo').checked, observacoes: val('#p-obs'),
-          codigo_barras: limpaCodigo(val('#p-cb')) || null };
+          codigo_barras: novo ? null : (limpaCodigo(val('#p-cb')) || null) };
+        // cadastro novo: confere os códigos de cada tamanho antes de gravar qualquer um
+        const codDe = (k) => limpaCodigo(cbs[k] || '') || null;
+        if (novo) {
+          const ks = prot ? volumes.map((v) => v + ' ml') : [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
+          const vistos = {};
+          for (const k of ks) {
+            const c = codDe(k); if (!c) continue;
+            if (vistos[c]) return toast(`O mesmo código foi lido no ${vistos[c]} e no ${k}. Cada tamanho tem um código diferente — confira.`, 'err');
+            vistos[c] = k;
+            const outro = produtoPorCodigo(c);
+            if (outro) return toast(`O código do ${k} (${c}) já está gravado em: ${outro.nome}.`, 'err');
+          }
+        }
         const ok = await tentar(async () => {
           if (prot) {
-            if (novo && base.codigo_barras && volumes.length > 1) throw new Error('Com código de barras, informe um volume só (cada volume tem um código).');
-            if (novo) { for (const v of volumes) await rpc('salvar_produto', { p: { ...base, tamanho: v + ' ml' } }); return volumes.length; }
+            if (novo) { for (const v of volumes) await rpc('salvar_produto', { p: { ...base, tamanho: v + ' ml', codigo_barras: codDe(v + ' ml') } }); return volumes.length; }
             await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: volumes[0] + ' ml' } });
             return 1;
           }
           if (novo) {
             const tams = [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
             if (!tams.length) throw new Error('Marque pelo menos um tamanho.');
-            if (base.codigo_barras && tams.length > 1) throw new Error('Com código de barras, marque só um tamanho (cada tamanho tem um código).');
-            for (const t of tams) await rpc('salvar_produto', { p: { ...base, tamanho: t } });
+            for (const t of tams) await rpc('salvar_produto', { p: { ...base, tamanho: t, codigo_barras: codDe(t) } });
             return tams.length;
           }
           await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: val('#p-tam') } });

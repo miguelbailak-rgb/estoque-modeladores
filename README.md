@@ -75,7 +75,7 @@ O sistema obriga a trocar a senha no primeiro acesso. Depois:
 - **Câmera**: toque em **Ler código** e aponte para o código de barras ou QR code. Na primeira vez o celular/iPad pede permissão para usar a câmera — toque em **Permitir**.
   Se negou sem querer: iPhone/iPad → Ajustes › Safari › Câmera › Permitir; Android → cadeado ao lado do endereço › Permissões › Câmera.
 - **Leitor de mão (USB ou Bluetooth)**: use um leitor no modo teclado (o padrão da maioria) que envia *Enter* no final. É só ler o código com a tela de Saída, Entrada, Estoque ou Produtos aberta. No iPad, pareie o leitor pelo Bluetooth como se fosse um teclado.
-- **Cadastrar o código de um produto**: leia o código na Entrada; se ele não estiver cadastrado, escolha o produto e o código fica gravado. Ou em Produtos › Editar › *Código de barras do fabricante*.
+- **Cadastrar o código de um produto**: no cadastro de qualquer produto (modelador, meia, placa ou prótese), ao marcar os tamanhos aparece um campo de código **para cada tamanho** — leia uma embalagem após a outra (o cursor pula sozinho para o próximo). Ou leia o código na Entrada; se ele não estiver cadastrado, escolha o produto e o código fica gravado. Ou em Produtos › Editar › *Código de barras do fabricante*.
 - Cada tamanho/cor tem o seu próprio código de barras.
 
 ### Instalar no celular como aplicativo

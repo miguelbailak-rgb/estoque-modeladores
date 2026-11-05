@@ -374,3 +374,10 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
   th { position: static; }
   tr { break-inside: avoid; }
 }
+
+/* cadastro: um código de barras por tamanho */
+.cb-lista { display: grid; gap: 8px; margin-top: 8px; }
+.cb-linha { display: grid; grid-template-columns: minmax(56px, auto) 1fr auto; gap: 8px; align-items: center; }
+.cb-tam { font-weight: 700; font-size: 1.05rem; text-align: center; padding: 10px 8px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line, rgba(0,0,0,.12)); }
+.cb-linha input { min-width: 0; }
+@media (max-width: 420px) { .cb-linha .btn.cam span { display: none; } }
