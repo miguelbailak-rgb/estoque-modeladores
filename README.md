@@ -96,7 +96,7 @@ Abra o endereço no celular e:
 | Estoque | todos | Saldo de cada item, alerta de reposição. Admin vê custos e faz ajuste de inventário (contagem física, com justificativa). |
 | Lançamentos | todos | Lançamentos do dia. Operador vê só os seus e pode **pedir estorno**; admin estorna direto. |
 | Painel | admin | Valor do estoque (custo e venda), itens para repor, faturamento, lucro e margem do mês, gráficos. |
-| Produtos | todos | Cadastro e edição de produtos, preços, estoque mínimo e código de barras. Custo e histórico de preços só o admin; inativar só admin/gerente. |
+| Produtos | todos | Cadastro e edição de produtos, preços, estoque mínimo e código de barras. Custo, histórico de preços e **apagar produto** só o admin; inativar só admin/gerente. Apagar um produto com estoque baixa as peças; se ele já teve movimentação, o histórico continua nos relatórios. |
 | Etiquetas | admin | Imprime etiquetas com QR code (folha A4, 3×7, 63,5×38,1 mm — Pimaco A4360) para modeladores sem código de barras. |
 | Estornos | admin | Aprovar ou recusar pedidos dos operadores. |
 | Relatórios | admin | Posição de estoque, extrato, vendas e margem, saídas por cirurgia, reposição, perdas/cortesias, por operador, curva ABC. Exporta para **Excel** e **PDF**. |

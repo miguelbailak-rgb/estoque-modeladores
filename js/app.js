@@ -1076,8 +1076,7 @@ ROTAS.estoque = async (el) => {
       return `<div class="row-item ${p.ativo ? '' : 'dim'}"><div class="main">
         <div class="title">${esc(p.nome)} ${p.ativo ? '' : '<span class="badge">inativo</span>'} ${baixo && p.ativo ? '<span class="badge out">repor</span>' : ''}</div>
         <div class="meta">${esc(p.sku)}${p.marca ? ' · ' + esc(p.marca) : ''} · mínimo ${nf(p.estoque_minimo)}${p.controla_serie ? '' : ` · venda ${brl(p.preco)}${isAdmin() ? ' · custo ' + brl(p.custo) : ''}`}</div>
-        ${p.controla_serie ? `<div class="row-actions"><a class="btn sm" href="#/proteses">Ver unidades (nº de série)</a></div>`
-          : isGestor() ? `<div class="row-actions"><button class="btn sm" data-aj="${p.id}">Ajustar contagem</button></div>` : ''}
+        ${p.controla_serie || isGestor() ? `<div class="row-actions">${p.controla_serie ? '<a class="btn sm" href="#/proteses">Ver unidades (nº de série)</a>' : `<button class="btn sm" data-aj="${p.id}">Ajustar contagem</button>`}${isAdmin() ? `<button class="btn sm danger" data-apg="${p.id}">Apagar</button>` : ''}</div>` : ''}
       </div><div class="side"><div class="saldo ${baixo ? 'low' : ''}">${nf(p.saldo)}</div><div class="small muted">${unidade(p, p.saldo)}</div></div></div>`;
     }).join('') : '<div class="empty">Nenhum item para mostrar.</div>';
   };
@@ -1092,6 +1091,8 @@ ROTAS.estoque = async (el) => {
   el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera(); if (c) mostrarCodigo(c); };
   q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = limpaCodigo(q.value); if (produtoPorCodigo(v) || /^[0-9]{6,}$/.test(v)) mostrarCodigo(v); } });
   el.querySelector('#es-lista').onclick = (e) => {
+    const ap = e.target.closest('[data-apg]');
+    if (ap) { apagarProduto(S.produtos.find((p) => p.id === Number(ap.dataset.apg)), () => desenhar()); return; }
     const b = e.target.closest('[data-aj]'); if (!b) return;
     ajusteInventario(S.produtos.find((p) => p.id === Number(b.dataset.aj)), () => desenhar());
   };
@@ -1122,6 +1123,29 @@ function ajusteInventario(p, depois) {
         const ok = await tentar(() => rpc('ajustar_inventario', { p_produto: p.id, p_contada: v, p_justificativa: b.querySelector('#aj-j').value }), e.submitter);
         if (!ok) return;
         toast('Ajuste registrado.', 'ok'); close(); await recarregarProdutos(); depois && depois();
+      };
+    },
+  });
+}
+
+// Apagar produto (somente administrador)
+function apagarProduto(p, depois) {
+  const tem = p.saldo > 0;
+  modal('Apagar produto', `<form id="f-ap">
+    <p><b>${esc(p.nome)}</b><br><span class="muted">${esc(p.sku)}${p.codigo_barras ? ' · código ' + esc(p.codigo_barras) : ''}</span></p>
+    ${tem ? `<div class="warn-box">Há <b>${nf(p.saldo)} ${unidade(p, p.saldo)}</b> em estoque. ${p.controla_serie ? 'Essas próteses serão baixadas do estoque.' : 'Essas peças serão baixadas (o estoque fica zerado).'}</div>` : ''}
+    <p class="small muted">O produto some do estoque, das listas e do cadastro. Se ele já teve entradas ou saídas, esse histórico continua nos relatórios e na auditoria. O código de barras fica livre para outro produto.</p>
+    <div class="field"><label for="ap-m">Motivo (obrigatório)</label><textarea id="ap-m" required placeholder="Ex.: cadastrado errado, produto descontinuado…"></textarea></div>
+    <div class="btn-row end"><button type="button" class="btn" data-x>Cancelar</button><button class="btn danger-solid" type="submit">Apagar produto</button></div></form>`, {
+    onMount(b, close) {
+      b.querySelector('#f-ap').onsubmit = async (e) => {
+        e.preventDefault();
+        const motivo = b.querySelector('#ap-m').value.trim();
+        if (!motivo) return toast('Informe o motivo.', 'err');
+        const r = await tentar(() => rpc('apagar_produto', { p_produto: p.id, p_motivo: motivo }), e.submitter);
+        if (!r) return;
+        toast(r.baixadas ? `Produto apagado e ${nf(r.baixadas)} ${unidade(p, r.baixadas)} baixada(s) do estoque.` : 'Produto apagado.', 'ok');
+        close(); await recarregarProdutos(); depois && depois();
       };
     },
   });
@@ -1516,7 +1540,7 @@ function formProduto(p, depois, inicial = {}) {
       <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
     </div>
     <div class="field"><label for="p-obs">Observações</label><textarea id="p-obs">${esc(p.observacoes)}</textarea></div>
-    <div class="btn-row end">${novo || !isAdmin() ? '' : '<button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
+    <div class="btn-row end">${novo || !isAdmin() ? '' : '<button type="button" class="btn danger" id="p-apagar">Apagar</button><button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
   </form>`, {
     onMount(b, close) {
       const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par' : 'peça'} ${brl(v - c)}` : ''; };
@@ -1586,6 +1610,8 @@ function formProduto(p, depois, inicial = {}) {
         b.querySelector('#p-tipo').addEventListener('change', desenharCbs);
         desenharCbs();
       }
+      const apg = b.querySelector('#p-apagar');
+      if (apg) apg.onclick = () => { close(); apagarProduto(S.produtos.find((x) => x.id === p.id) || p, depois); };
       const h = b.querySelector('#p-hist');
       if (h) h.onclick = async () => {
         const hist = await tentar(() => rpc('historico_precos', { p_produto: p.id })); if (!hist) return;
