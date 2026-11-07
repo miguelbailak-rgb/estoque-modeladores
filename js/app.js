@@ -62,7 +62,9 @@ const PERFIS = { admin: 'Administrador', gerente: 'Gerente de estoque', operador
 const nomePerfil = (p) => PERFIS[p] || p;
 // admin, ou operador com liberação temporária para cadastrar produtos novos
 const liberadoAte = () => (S.user && S.user.perfil === 'operador' && S.user.cadastro_ate && new Date(S.user.cadastro_ate) > new Date() ? new Date(S.user.cadastro_ate) : null);
-const podeCadastrar = () => !!S.user; // todos cadastram e editam produtos (custo só o administrador)
+const podeCadastrar = () => !!S.user; // todos cadastram produto novo (custo só o administrador)
+// alterar produto já cadastrado: admin/gerente, ou operador com liberação temporária
+const podeEditarProduto = () => isGestor() || !!liberadoAte();
 // Orientações por tipo de produto (aparecem no cadastro e nas telas de entrada/saída)
 const ehPorPar = (tipo) => /lateral|flanco/i.test(tipo || '') && /placa/i.test(tipo || '');
 const unidade = (p, n) => (p && ehPorPar(p.tipo) ? (n === 1 ? 'par' : 'pares') : (n === 1 ? 'unidade' : 'unidades'));
@@ -208,7 +210,9 @@ function avisarTela() { if (aoAtualizarDados) { try { aoAtualizarDados(); } catc
 async function carregarBase() {
   const r = await rpc('inicio');
   if (!r || !S.user) return;
+  const podiaEditar = podeEditarProduto();
   Object.assign(S.user, r.usuario || {});
+  if (podiaEditar !== podeEditarProduto() && rotaAtual() === 'produtos' && !document.querySelector('.modal-back')) setTimeout(render, 0);
   if (r.usuario && r.usuario.trocar_senha) return;
   S.produtos = r.produtos || [];
   S.listas = r.listas || {};
@@ -383,21 +387,19 @@ function desenharNav() {
   };
 }
 
-// Operador: confere se a liberação de cadastro mudou (ao usar o app, ao voltar para ele e quando o prazo vence)
+// Operador: confere se a liberação para alterar produtos mudou (ao usar o app, ao voltar para ele e quando o prazo vence)
 let ultimaVerificacao = 0, timerPrazo = null;
 async function verificarLiberacao(forcar = false) {
-  return; // liberação temporária não é mais necessária: todos cadastram produtos
-  // eslint-disable-next-line no-unreachable
   if (!S.user || S.user.perfil !== 'operador' || S.user.trocar_senha) return;
   if (!forcar && Date.now() - ultimaVerificacao < 60000) return;
   ultimaVerificacao = Date.now();
-  const antes = podeCadastrar();
+  const antes = podeEditarProduto();
   try { Object.assign(S.user, await rpc('sessao')); } catch { return; }
   agendarFimPrazo();
-  if (antes === podeCadastrar()) return;
-  if (!navAtual().some(([k]) => k === rotaAtual())) { render(); return; }
-  desenharNav();
-  toast(podeCadastrar() ? 'Cadastro de produtos liberado para você (menu Produtos).' : 'A liberação de cadastro de produtos terminou.', podeCadastrar() ? 'ok' : '');
+  const agora = podeEditarProduto();
+  if (antes === agora) return;
+  if (rotaAtual() === 'produtos' && !document.querySelector('.modal-back')) render();
+  toast(agora ? 'Alteração de produtos liberada para você (Produtos › Editar).' : 'A liberação para alterar produtos terminou.', agora ? 'ok' : '');
 }
 function agendarFimPrazo() {
   clearTimeout(timerPrazo);
@@ -1456,10 +1458,10 @@ ROTAS.painel = async (el) => {
 ROTAS.produtos = async (el) => {
   await produtosRapido();
   rpc('listas').then((l) => { if (l) { S.listas = l; salvarCache(); } }).catch(() => {});
-  const adm = isAdmin(), gest = true;
+  const adm = isAdmin(), gest = podeEditarProduto(); // operador cadastra; altera os já cadastrados só com liberação
   const ate = liberadoAte();
   el.innerHTML = `<div class="page-head"><h1>Produtos</h1><button class="btn primary" id="pr-novo">+ Novo produto</button></div>
-    ${gest || !ate ? '' : `<div class="info-box">Cadastro de produtos novos liberado para você até <b>${esc(dt(ate.toISOString()))}</b>. Produtos já cadastrados só podem ser alterados pelo administrador.</div>`}
+    ${isGestor() || !ate ? '' : `<div class="info-box">Alteração de produtos liberada para você até <b>${esc(dt(ate.toISOString()))}</b>.</div>`}
     <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
     <label class="check ${isGestor() ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
     <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${gest ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
@@ -1687,8 +1689,14 @@ ROTAS.etiquetas = async (el) => {
         <label class="check"><input type="checkbox" id="et-saldo"> Quantidade = estoque atual</label></div>
       <div class="btn-row" style="margin-bottom:12px"><button class="btn sm" id="et-todos">Marcar todos</button><button class="btn sm" id="et-nenhum">Desmarcar</button></div>
       <div class="table-wrap" style="max-height:420px"><table><thead><tr><th></th><th>Produto</th><th class="num">Estoque</th><th class="num">Etiquetas</th></tr></thead><tbody id="et-body"></tbody></table></div>
-      <div class="btn-row" style="margin-top:14px"><button class="btn primary big" id="et-imprimir">Imprimir etiquetas</button><span class="muted" id="et-total" style="align-self:center"></span></div>
-      <p class="muted small" style="margin-top:10px">Folha A4 com 3 colunas × 7 linhas (etiquetas de 63,5 × 38,1 mm, tipo Pimaco A4360/A4260). Também dá para imprimir em papel comum e recortar.</p>
+      <div class="grid3" style="margin-top:14px">
+        <div class="field"><label for="et-ini">Começar na etiqueta nº</label><input id="et-ini" type="number" inputmode="numeric" min="1" max="21" value="1"><span class="hint">Para aproveitar folha já usada (1 a 21, da esquerda para a direita).</span></div>
+        <div class="field"><label for="et-dy">Ajuste vertical (mm)</label><input id="et-dy" type="number" inputmode="decimal" step="0.5" min="-10" max="10" value="0"><span class="hint">Positivo desce; negativo sobe.</span></div>
+        <div class="field"><label for="et-dx">Ajuste horizontal (mm)</label><input id="et-dx" type="number" inputmode="decimal" step="0.5" min="-10" max="10" value="0"><span class="hint">Positivo vai para a direita.</span></div>
+      </div>
+      <div class="btn-row" style="margin-top:6px"><button class="btn primary big" id="et-imprimir">Imprimir etiquetas</button><span class="muted" id="et-total" style="align-self:center"></span></div>
+      <div class="info-box" style="margin-top:12px"><b>Na janela de impressão:</b> tamanho do papel <b>A4</b>, escala <b>100%</b> (não “ajustar à página”) e <b>desmarque “Imprimir cabeçalhos e rodapés”</b>.</div>
+      <p class="muted small" style="margin-top:10px">Folha A4 com 3 colunas × 7 linhas (etiquetas de 63,5 × 38,1 mm, tipo Pimaco A4360/A4260). Faça um teste em papel comum, coloque sobre a folha de etiquetas contra a luz e, se precisar, use o ajuste fino.</p>
     </div>
     <div id="etiquetas-saida"></div>`;
   const $ = (x) => el.querySelector(x);
@@ -1706,9 +1714,16 @@ ROTAS.etiquetas = async (el) => {
   };
   const totais = () => {
     const n = Object.values(qtd).reduce((a, b) => a + (b || 0), 0);
-    $('#et-total').textContent = n ? `${nf(n)} etiqueta(s) · ${nf(Math.ceil(n / 21))} folha(s)` : 'Nenhuma etiqueta selecionada';
+    const ini = inicio();
+    $('#et-total').textContent = n ? `${nf(n)} etiqueta(s) · ${nf(Math.ceil((n + ini - 1) / 21))} folha(s)` : 'Nenhuma etiqueta selecionada';
   };
   const padrao = (p) => ($('#et-saldo').checked ? Math.max(p.saldo, 1) : 1);
+  const inicio = () => Math.min(21, Math.max(1, parseInt($('#et-ini').value, 10) || 1));
+  const mm = (v) => Math.min(10, Math.max(-10, parseFloat(String(v).replace(',', '.')) || 0));
+  // ajuste fino fica guardado neste aparelho (cada impressora puxa um pouco diferente)
+  try { const a = JSON.parse(localStorage.getItem('etq_ajuste') || '{}'); if (a.dx) $('#et-dx').value = a.dx; if (a.dy) $('#et-dy').value = a.dy; } catch { /* sem armazenamento */ }
+  ['#et-dx', '#et-dy'].forEach((k) => $(k).addEventListener('change', () => { try { localStorage.setItem('etq_ajuste', JSON.stringify({ dx: mm($('#et-dx').value), dy: mm($('#et-dy').value) })); } catch { /* ignora */ } }));
+  $('#et-ini').addEventListener('input', () => totais());
   $('#et-q').oninput = desenharLista;
   $('#et-body').addEventListener('input', (e) => {
     const s = e.target.closest('[data-sel]'), q = e.target.closest('[data-q]');
@@ -1733,10 +1748,26 @@ ROTAS.etiquetas = async (el) => {
         <div class="et-sku">${esc(p.sku)}${preco ? ' · ' + brl(p.preco) : ''}</div></div></div>`;
       for (let i = 0; i < qtd[p.id]; i++) blocos.push(html);
     });
-    $('#etiquetas-saida').innerHTML = `<h2 class="no-print" style="margin-top:8px">Prévia</h2><div class="folha-etiquetas">${blocos.join('')}</div>`;
+    // Pimaco A4360/A4260: margem superior 15,15 mm, lateral 7,2 mm, passo 66,04 × 38,1 mm
+    const dx = mm($('#et-dx').value), dy = mm($('#et-dy').value);
+    const posicoes = [...Array(inicio() - 1).fill(null), ...blocos];
+    const folhas = [];
+    for (let i = 0; i < posicoes.length; i += 21) folhas.push(posicoes.slice(i, i + 21));
+    const folhaHtml = (f) => `<div class="etq-folha">${f.map((h, i) => (h ? h.replace('<div class="etiqueta">',
+      `<div class="etiqueta" style="left:${(7.2 + (i % 3) * 66.04 + dx).toFixed(2)}mm;top:${(15.15 + Math.floor(i / 3) * 38.1 + dy).toFixed(2)}mm">`) : '')).join('')}</div>`;
+    $('#etiquetas-saida').innerHTML = `<h2 style="margin-top:8px">Prévia</h2><div class="folha-etiquetas">${blocos.join('')}</div>`;
+    let raiz = document.getElementById('etq-impressao');
+    if (!raiz) { raiz = document.createElement('div'); raiz.id = 'etq-impressao'; document.body.appendChild(raiz); }
+    raiz.innerHTML = folhas.map(folhaHtml).join('');
+    // folha sem margens: o navegador não acrescenta margens, cabeçalho nem rodapé
+    const pg = document.createElement('style'); pg.id = 'etq-page'; pg.textContent = '@page { size: 210mm 297mm; margin: 0; }';
+    document.head.appendChild(pg);
     await new Promise((r) => setTimeout(r, 150));
-    document.body.classList.add('imprimir-etiquetas'); window.print();
-    setTimeout(() => document.body.classList.remove('imprimir-etiquetas'), 500);
+    document.body.classList.add('imprimir-etiquetas');
+    const fim = () => { document.body.classList.remove('imprimir-etiquetas'); pg.remove(); window.removeEventListener('afterprint', fim); };
+    window.addEventListener('afterprint', fim);
+    window.print();
+    setTimeout(() => { if (!window.matchMedia('print').matches) fim(); }, 1500);
   }, e.currentTarget);
   desenharLista();
 };
@@ -2020,8 +2051,9 @@ ROTAS.usuarios = async (el) => {
         ${u.ativo ? '' : '<span class="badge">desativado</span>'} ${u.bloqueado ? '<span class="badge out">bloqueado</span>' : ''} ${u.trocar_senha ? '<span class="badge warn">troca de senha pendente</span>' : ''}</div>
       <div class="meta">Usuário: <b>${esc(u.login)}</b> · desde ${dOnly(u.criado_em)}</div>
 
+      ${u.perfil === 'operador' && u.cadastro_ate ? `<div class="liberado">Pode alterar produtos até ${esc(dt(u.cadastro_ate))}</div>` : ''}
       <div class="row-actions"><button class="btn sm" data-ed="${u.id}">Editar</button><button class="btn sm" data-pw="${u.id}">Redefinir senha</button>
-</div>
+        ${u.perfil === 'operador' && u.ativo ? (u.cadastro_ate ? `<button class="btn sm" data-fim="${u.id}">Encerrar liberação</button>` : `<button class="btn sm" data-lib="${u.id}">Liberar alteração de produtos</button>`) : ''}</div>
     </div></div>`).join('')}</div>`;
   el.querySelector('#us-novo').onclick = () => formUsuario(null, () => render());
   el.querySelector('.list').onclick = (e) => {
@@ -2031,7 +2063,7 @@ ROTAS.usuarios = async (el) => {
     if (lib) liberarCadastro(us.find((u) => u.id === Number(lib.dataset.lib)));
     if (fim) {
       const u = us.find((x) => x.id === Number(fim.dataset.fim));
-      confirmar('Encerrar liberação', `${esc(u.nome)} vai deixar de poder cadastrar produtos agora.`, { ok: 'Encerrar', kind: 'out' }).then(async (ok) => {
+      confirmar('Encerrar liberação', `${esc(u.nome)} vai deixar de poder alterar produtos já cadastrados agora (continua cadastrando produtos novos).`, { ok: 'Encerrar', kind: 'out' }).then(async (ok) => {
         if (ok && await tentar(async () => { await rpc('liberar_cadastro', { p_usuario: u.id, p_ate: null }); return true; })) { toast('Liberação encerrada.', 'ok'); render(); }
       });
     }
@@ -2061,9 +2093,9 @@ function liberarCadastro(u) {
     ['7d', 'Por 7 dias', new Date(agora.getTime() + 7 * 24 * 3600e3)],
     ['outro', 'Escolher data e hora', null],
   ];
-  modal('Liberar cadastro de produtos', `<form id="f-lib">
-    <p><b>${esc(u.nome)}</b> poderá <b>cadastrar produtos novos</b> (e gravar o código de barras de produtos que ainda não têm), além das entradas e saídas de sempre.</p>
-    <p class="muted">Não poderá alterar produtos existentes, preços, nem ver custos, relatórios, painel ou usuários. A liberação termina sozinha no prazo escolhido.</p>
+  modal('Liberar alteração de produtos', `<form id="f-lib">
+    <p><b>${esc(u.nome)}</b> poderá <b>alterar produtos já cadastrados</b> (nome, tamanho, preço de venda, estoque mínimo e código de barras), além de cadastrar produtos novos e fazer entradas e saídas.</p>
+    <p class="muted">Continua sem ver custos, sem ajustar contagem, apagar ou inativar produtos, e sem relatórios, painel ou usuários. A liberação termina sozinha no prazo escolhido.</p>
     <div class="field"><span class="label">Por quanto tempo?</span><div class="pills">${opcoes.map(([k, t], i) => `<label class="pill"><input type="radio" name="prazo" value="${k}" ${i === 0 ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
     <div class="field hidden" id="lib-outro"><label for="lib-ate">Liberado até</label><input id="lib-ate" type="datetime-local" min="${local(agora)}" value="${local(new Date(agora.getTime() + 3 * 24 * 3600e3))}"></div>
     <p class="muted" id="lib-resumo"></p>
@@ -2085,7 +2117,7 @@ function liberarCadastro(u) {
         const d = escolhido();
         if (!d || isNaN(d)) return toast('Escolha a data e hora.', 'err');
         if (await tentar(async () => { await rpc('liberar_cadastro', { p_usuario: u.id, p_ate: d.toISOString() }); return true; }, e.submitter)) {
-          toast(`Cadastro liberado para ${u.nome}.`, 'ok'); close(); render();
+          toast(`Alteração de produtos liberada para ${u.nome}.`, 'ok'); close(); render();
         }
       };
     },
@@ -2103,7 +2135,7 @@ function formUsuario(u, depois) {
       <label class="pill"><input type="radio" name="perfil" value="gerente" ${u.perfil === 'gerente' ? 'checked' : ''}><span>Gerente de estoque</span></label>
       <label class="pill"><input type="radio" name="perfil" value="admin" ${u.perfil === 'admin' ? 'checked' : ''}><span>Administrador</span></label></div>
       <div class="perfis-ajuda">
-        <p><b>Operador</b>: registra entradas e saídas, consulta o estoque e cadastra/edita produtos. Sem custos.</p>
+        <p><b>Operador</b>: registra entradas e saídas, consulta o estoque e cadastra produtos novos (não altera os já cadastrados). Sem custos.</p>
         <p><b>Gerente de estoque</b>: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque. <b>Não vê custos, lucro, margem nem faturamento</b>, e não mexe em usuários.</p>
         <p><b>Administrador</b>: acesso total.</p></div></div>
     ${novo ? '' : `<label class="check"><input type="checkbox" id="u-ativo" ${u.ativo ? 'checked' : ''}> Ativo (pode entrar no sistema)</label>`}
