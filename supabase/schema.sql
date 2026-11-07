@@ -245,7 +245,7 @@ begin
   return u;
 end $$;
 
--- cadastro e edição de produtos: todos os perfis (custo só o administrador)
+-- cadastro de produtos: todos os perfis; alterar produto já cadastrado: admin/gerente (custo só o administrador)
 create or replace function estoque._pode_cadastrar(u estoque.usuarios) returns boolean
 language sql stable as $$
   select u.perfil in ('admin','gerente','operador')
@@ -658,10 +658,15 @@ begin
   if not estoque._pode_cadastrar(u) then
     raise exception 'Cadastro de produtos não liberado para você. Peça ao administrador.';
   end if;
-  if not adm then -- operador: não troca o código interno nem inativa
+  if not adm then -- operador: cadastra produto novo; altera os já cadastrados só com liberação temporária
     p := p - 'sku';
-    if nullif(p ->> 'id','') is null then p := p || jsonb_build_object('ativo', true);
-    else p := p || jsonb_build_object('ativo', (select ativo from estoque.produtos where id = (p ->> 'id')::int)); end if;
+    if nullif(p ->> 'id','') is null then
+      p := p || jsonb_build_object('ativo', true);
+    elsif coalesce(u.cadastro_ate > now(), false) then
+      p := p || jsonb_build_object('ativo', (select ativo from estoque.produtos where id = (p ->> 'id')::int));
+    else
+      raise exception 'Somente o administrador ou o gerente pode alterar produtos já cadastrados (ou peça uma liberação temporária).';
+    end if;
   end if;
   cb := regexp_replace(coalesce(p ->> 'codigo_barras',''), '\s', '', 'g');
   if cb = '' then cb := null; end if;
@@ -909,7 +914,7 @@ begin
     order by 2, 3 limit 1000) t), '[]'::jsonb);
 end $$;
 
--- Grava o código de barras lido num produto (admin; ou operador liberado, só em produto sem código)
+-- Grava o código de barras lido num produto (admin/gerente; operador só em produto ainda sem código)
 create or replace function public.vincular_codigo(p_token text, p_produto int, p_codigo text) returns jsonb
 language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; pr estoque.produtos; cb text;
@@ -922,8 +927,9 @@ begin
   if cb = '' then raise exception 'Código vazio.'; end if;
   select * into pr from estoque.produtos where id = p_produto for update;
   if not found or pr.excluido then raise exception 'Produto não encontrado.'; end if;
-  if false and pr.codigo_barras is not null and pr.codigo_barras <> cb then
-    raise exception 'Este produto já tem outro código de barras. Somente o administrador pode trocar.';
+  if u.perfil = 'operador' and not coalesce(u.cadastro_ate > now(), false)
+     and pr.codigo_barras is not null and pr.codigo_barras <> cb then
+    raise exception 'Este produto já tem outro código de barras. Somente o administrador ou o gerente pode trocar.';
   end if;
   if exists (select 1 from estoque.produtos where (codigo_barras = cb or upper(sku) = upper(cb)) and id <> pr.id) then
     raise exception 'Este código já pertence a outro produto.';
@@ -965,7 +971,7 @@ begin
   return jsonb_build_object('modo', 'arquivado', 'baixadas', s);
 end $$;
 
--- Libera (ou encerra, com p_ate nulo) o cadastro temporário de produtos para um operador
+-- Libera (ou encerra, com p_ate nulo) a alteração temporária de produtos já cadastrados para um operador
 create or replace function public.liberar_cadastro(p_token text, p_usuario int, p_ate timestamptz) returns void
 language plpgsql security definer set search_path = estoque, extensions, public as $$
 declare u estoque.usuarios; alvo estoque.usuarios;
@@ -973,11 +979,11 @@ begin
   u := estoque._admin(p_token);
   select * into alvo from estoque.usuarios where id = p_usuario for update;
   if not found then raise exception 'Usuário não encontrado.'; end if;
-  if alvo.perfil <> 'operador' then raise exception 'Administrador e gerente de estoque já podem cadastrar produtos.'; end if;
+  if alvo.perfil <> 'operador' then raise exception 'Administrador e gerente de estoque já podem alterar produtos.'; end if;
   if p_ate is not null and p_ate <= now() then raise exception 'Escolha uma data e hora no futuro.'; end if;
   if p_ate is not null and p_ate > now() + interval '90 days' then raise exception 'A liberação pode ser de no máximo 90 dias.'; end if;
   update estoque.usuarios set cadastro_ate = p_ate where id = p_usuario;
-  perform estoque._audit(u.id, case when p_ate is null then 'cadastro_encerrado' else 'cadastro_liberado' end,
+  perform estoque._audit(u.id, case when p_ate is null then 'alteracao_produtos_encerrada' else 'alteracao_produtos_liberada' end,
                          jsonb_build_object('usuario', alvo.login, 'ate', p_ate));
 end $$;
 
