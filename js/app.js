@@ -327,7 +327,7 @@ function telaTrocarSenha(obrigatoria) {
 
 /* ---------------- estrutura e navegação ---------------- */
 const NAV_OPER = [
-  ['saida', 'Saída'], ['entrada', 'Entrada'], ['produtos', 'Produtos'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'],
+  ['saida', 'Saída'], ['entrada', 'Entrada'], ['produtos', 'Produtos'], ['estoque', 'Estoque'], ['hoje', 'Lançamentos'], ['proteses', 'Próteses'], ['etiquetas', 'Etiquetas'],
 ];
 const NAV_CURTO = { hoje: 'Hoje' }; // rótulo que cabe na barra de baixo do celular
 const NAV_ADMIN = [
@@ -341,6 +341,8 @@ const NAV_GERENTE = [
 ];
 const ROTAS = {};
 const navAtual = () => (isAdmin() ? NAV_ADMIN : isGerente() ? NAV_GERENTE : NAV_OPER);
+// quantos itens ficam na barra de baixo antes do botão "Mais" (o operador tem nomes curtos: cabem 5)
+const nBarra = (nav) => (nav.length <= 6 ? nav.length : isGestor() ? 4 : 5);
 const rotaInicial = () => (isAdmin() ? 'painel' : isGerente() ? 'estoque' : 'saida');
 const rotaAtual = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || rotaInicial());
 
@@ -348,7 +350,7 @@ function shell() {
   const nav = navAtual();
   const r = rotaAtual();
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
-  const bottom = nav.length > 6 ? nav.slice(0, 4) : nav;
+  const bottom = nav.slice(0, nBarra(nav));
   $app.innerHTML = `<div class="shell">
     <header class="topbar">
       <div class="brand"><div class="brand-mark">EM</div><div style="min-width:0"><div class="brand-title">Estoque de Modeladores</div><div class="brand-sub">${esc(CFG.CLINICA || '')}</div></div></div>
@@ -375,7 +377,7 @@ function desenharNav() {
   const nav = navAtual();
   const r = rotaAtual();
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
-  const bottom = nav.length > 6 ? nav.slice(0, 4) : nav;
+  const bottom = nav.slice(0, nBarra(nav));
   side.innerHTML = nav.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
   bot.innerHTML = bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}" aria-label="${t}">${icon(k)}${NAV_CURTO[k] || t}</a>`).join('')
     + (nav.length > 6 ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : '');
@@ -383,7 +385,7 @@ function desenharNav() {
   if (mais) mais.onclick = () => {
     const back = document.createElement('div'); back.className = 'drawer-back';
     const dr = document.createElement('div'); dr.className = 'drawer';
-    dr.innerHTML = '<div class="grab"></div>' + nav.slice(4).map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
+    dr.innerHTML = '<div class="grab"></div>' + nav.slice(nBarra(nav)).map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
     const fechar = () => { back.remove(); dr.remove(); };
     back.onclick = fechar; dr.onclick = (e) => { if (e.target.closest('a')) fechar(); };
     document.body.append(back, dr);
@@ -1723,7 +1725,7 @@ function formProduto(p, depois, inicial = {}) { // depois({ entradas }) — entr
 }
 
 /* =========================================================
-   ETIQUETAS COM QR CODE (admin)
+   ETIQUETAS COM QR CODE (todos)
    ========================================================= */
 ROTAS.etiquetas = async (el) => {
   await recarregarProdutos();
@@ -1734,7 +1736,7 @@ ROTAS.etiquetas = async (el) => {
         <label class="check"><input type="checkbox" id="et-preco"> Mostrar preço</label>
         <label class="check"><input type="checkbox" id="et-saldo"> Quantidade = estoque atual</label></div>
       <div class="btn-row" style="margin-bottom:12px"><button class="btn sm" id="et-todos">Marcar todos</button><button class="btn sm" id="et-nenhum">Desmarcar</button></div>
-      <div class="table-wrap" style="max-height:420px"><table><thead><tr><th></th><th>Produto</th><th class="num">Estoque</th><th class="num">Etiquetas</th></tr></thead><tbody id="et-body"></tbody></table></div>
+      <div class="table-wrap" style="max-height:420px"><table class="et-tab"><thead><tr><th></th><th>Produto</th><th class="num">Estoque</th><th class="num">Etiquetas</th></tr></thead><tbody id="et-body"></tbody></table></div>
       <div class="grid3" style="margin-top:14px">
         <div class="field"><label for="et-ini">Começar na etiqueta nº</label><input id="et-ini" type="number" inputmode="numeric" min="1" max="21" value="1"><span class="hint">Para aproveitar folha já usada (1 a 21, da esquerda para a direita).</span></div>
         <div class="field"><label for="et-dy">Ajuste vertical (mm)</label><input id="et-dy" type="number" inputmode="decimal" step="0.5" min="-10" max="10" value="0"><span class="hint">Positivo desce; negativo sobe.</span></div>
@@ -1753,8 +1755,8 @@ ROTAS.etiquetas = async (el) => {
     const lista = ativos().filter((p) => { const a = norm([p.nome, p.sku, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
     $('#et-body').innerHTML = lista.length ? lista.map((p) => `<tr>
       <td><label class="check" style="min-height:0"><input type="checkbox" data-sel="${p.id}" ${qtd[p.id] ? 'checked' : ''} aria-label="Selecionar ${esc(p.nome)}"></label></td>
-      <td>${esc(p.nome)}<div class="small muted">${esc(p.sku)}</div></td><td class="num">${nf(p.saldo)}</td>
-      <td class="num"><input type="number" inputmode="numeric" min="0" max="200" data-q="${p.id}" value="${qtd[p.id] || 0}" style="width:90px;min-height:44px;text-align:center"></td></tr>`).join('')
+      <td>${esc(p.nome)}<div class="small muted">${esc(p.sku)}<span class="et-saldo-cel"> · ${nf(p.saldo)} em estoque</span></div></td><td class="num">${nf(p.saldo)}</td>
+      <td class="num"><input type="number" inputmode="numeric" min="0" max="200" data-q="${p.id}" value="${qtd[p.id] || 0}" aria-label="Quantidade de etiquetas de ${esc(p.nome)}"></td></tr>`).join('')
       : '<tr><td colspan="4" class="muted">Nenhum produto.</td></tr>';
     totais();
   };
@@ -2181,7 +2183,7 @@ function formUsuario(u, depois) {
       <label class="pill"><input type="radio" name="perfil" value="gerente" ${u.perfil === 'gerente' ? 'checked' : ''}><span>Gerente de estoque</span></label>
       <label class="pill"><input type="radio" name="perfil" value="admin" ${u.perfil === 'admin' ? 'checked' : ''}><span>Administrador</span></label></div>
       <div class="perfis-ajuda">
-        <p><b>Operador</b>: registra entradas e saídas, consulta o estoque e cadastra produtos novos (não altera os já cadastrados). Sem custos.</p>
+        <p><b>Operador</b>: registra entradas e saídas, consulta o estoque e cadastra produtos novos (não altera os já cadastrados) e imprime etiquetas. Sem custos.</p>
         <p><b>Gerente de estoque</b>: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque. <b>Não vê custos, lucro, margem nem faturamento</b>, e não mexe em usuários.</p>
         <p><b>Administrador</b>: acesso total.</p></div></div>
     ${novo ? '' : `<label class="check"><input type="checkbox" id="u-ativo" ${u.ativo ? 'checked' : ''}> Ativo (pode entrar no sistema)</label>`}

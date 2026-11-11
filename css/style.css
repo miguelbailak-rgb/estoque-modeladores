@@ -408,3 +408,13 @@ details.mais > summary + * { margin-top: 14px; }
 .cb-linha .cb-qt { grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink-2); }
 .cb-linha .cb-qt input { width: 92px; min-height: 48px; text-align: center; font-size: 1.2rem; font-weight: 700; }
 .bottomnav a, .bottomnav button { min-width: 0; padding: 0 2px; white-space: nowrap; }
+
+/* Etiquetas: no celular a quantidade tem de caber na tela, sem rolar para o lado */
+.et-tab [data-q] { width: 90px; min-height: 44px; text-align: center; }
+.et-saldo-cel { display: none; }
+@media (max-width: 560px) {
+  .et-tab th:nth-child(3), .et-tab td:nth-child(3) { display: none; }
+  .et-tab th, .et-tab td { padding: 10px 6px; }
+  .et-tab [data-q] { width: 68px; }
+  .et-saldo-cel { display: inline; }
+}

@@ -3,7 +3,7 @@
 Controle de estoque de modeladores pós-operatórios da **Miguel Bailak Cirurgia Plástica**.
 Funciona no celular, tablet e computador, pela internet.
 
-- **Operador** (recepção/secretária): registra entradas e saídas, consulta o estoque e **cadastra produtos novos** (não altera os já cadastrados) — não vê custos nem margens.
+- **Operador** (recepção/secretária): registra entradas e saídas, consulta o estoque, **cadastra produtos novos** (não altera os já cadastrados) e **imprime etiquetas** — não vê custos nem margens.
 - **Gerente de estoque**: tudo do estoque — cadastra e edita produtos, ajusta contagem, aprova estornos, etiquetas, próteses e relatórios de estoque — **sem** custos, lucro, margem, faturamento, usuários, auditoria e backup.
 - **Administrador**: tudo do operador + painel, produtos e preços, ajustes de inventário, aprovação de estornos, relatórios, usuários, auditoria e backup.
 
@@ -115,7 +115,7 @@ Abra o endereço no celular e:
 | Lançamentos | todos | Lançamentos do dia. Operador vê só os seus e pode **pedir estorno**; admin estorna direto. |
 | Painel | admin | Valor do estoque (custo e venda), itens para repor, faturamento, lucro e margem do mês, gráficos. |
 | Produtos | todos | Cadastro de produtos novos (todos) e edição (admin/gerente), preços, estoque mínimo e código de barras. Custo, histórico de preços e **apagar produto** só o admin; inativar só admin/gerente. Apagar um produto com estoque baixa as peças; se ele já teve movimentação, o histórico continua nos relatórios. |
-| Etiquetas | admin | Imprime etiquetas com QR code (folha A4, 3×7, 63,5×38,1 mm — Pimaco A4360) para modeladores sem código de barras. |
+| Etiquetas | todos | Imprime etiquetas com QR code (folha A4, 3×7, 63,5×38,1 mm — Pimaco A4360) para modeladores sem código de barras. |
 | Estornos | admin | Aprovar ou recusar pedidos dos operadores. |
 | Relatórios | admin | Posição de estoque, extrato, vendas e margem, saídas por cirurgia, reposição, perdas/cortesias, por operador, curva ABC. Exporta para **Excel** e **PDF**. |
 | Usuários | admin | Criar, desativar, redefinir senha (também desbloqueia). **Liberar alteração de produtos** temporária para um operador. |
