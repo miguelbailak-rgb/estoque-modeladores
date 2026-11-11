@@ -63,6 +63,12 @@ O sistema obriga a trocar a senha no primeiro acesso. Depois:
 3. **Entrada** → lance o estoque inicial (motivo *Compra de fornecedor* ou *Outro*).
 4. **Usuários** → crie os operadores (cada um cria a própria senha no primeiro acesso).
 
+### Cadastro rápido (produto que chegou)
+
+Em **Produtos › + Novo produto** (ou em **Entrada › Produto novo?**): tipo, modelo, tamanhos e preço. Para cada tamanho marcado, leia o código de barras e informe **quantas chegaram** — o botão vira *Salvar e dar entrada* e o estoque já entra junto (motivo *Compra de fornecedor*). Cor, marca, fornecedor e estoque mínimo ficam em **Mais opções**.
+
+Na **Saída**, *Venda à paciente* já vem marcada, o valor vem do cadastro e a forma de pagamento é escolhida com um toque; nos outros motivos, valor e pagamento somem. Na **Entrada**, *Compra de fornecedor* já vem marcada.
+
 ### Próteses mamárias
 
 - **Cadastro** (Produtos › + Novo produto › Tipo *Prótese mamária*): marca, linha, formato, perfil, superfície e os **volumes em ml** — digite vários de uma vez (ex.: `250 275 300`) e cada volume vira um item. Grave o código de barras (GTIN) de cada volume, se quiser ler pela caixa. Próteses **não têm valores** (são pagas pela paciente) nem validade.

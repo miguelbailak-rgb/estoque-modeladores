@@ -15,6 +15,8 @@ const P_FORMATOS = ['Redonda', 'Anatômica'];
 const P_PERFIS = ['Perfil baixo', 'Perfil moderado', 'Perfil alto', 'Perfil extra alto', 'Perfil super alto'];
 const P_SUPERFICIES = ['Texturizada', 'Microtexturizada', 'Nanotexturizada', 'Lisa', 'Poliuretano'];
 const MOTIVOS_VENDA = ['Venda à paciente', 'Incluído no pacote cirúrgico'];
+// formas de pagamento que a pessoa escolhe na venda (as outras duas o app marca sozinho)
+const PAG_COBRADO = (L) => (L.forma_pagamento || []).filter((x) => !['Incluso no pacote', 'Sem cobrança'].includes(x));
 const MOTIVOS_PACIENTE = ['Venda à paciente', 'Incluído no pacote cirúrgico', 'Cortesia', 'Troca', 'Implantada na paciente'];
 const MOTIVOS_SAIDA_PROTESE = ['Implantada na paciente', 'Troca', 'Devolução ao fornecedor', 'Perda / avaria'];
 const MOTIVOS_PERDA = ['Cortesia', 'Perda / avaria', 'Uso interno', 'Troca'];
@@ -325,8 +327,9 @@ function telaTrocarSenha(obrigatoria) {
 
 /* ---------------- estrutura e navegação ---------------- */
 const NAV_OPER = [
-  ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'], ['produtos', 'Produtos'],
+  ['saida', 'Saída'], ['entrada', 'Entrada'], ['produtos', 'Produtos'], ['estoque', 'Estoque'], ['proteses', 'Próteses'], ['hoje', 'Lançamentos'],
 ];
+const NAV_CURTO = { hoje: 'Hoje' }; // rótulo que cabe na barra de baixo do celular
 const NAV_ADMIN = [
   ['painel', 'Painel'], ['saida', 'Saída'], ['entrada', 'Entrada'], ['estoque', 'Estoque'],
   ['proteses', 'Próteses'], ['hoje', 'Lançamentos'], ['relatorios', 'Relatórios'], ['produtos', 'Produtos'], ['etiquetas', 'Etiquetas'], ['estornos', 'Estornos'],
@@ -374,7 +377,7 @@ function desenharNav() {
   const badge = (k) => (k === 'estornos' && S.pendentes ? ` <span class="badge count">${S.pendentes}</span>` : '');
   const bottom = nav.length > 6 ? nav.slice(0, 4) : nav;
   side.innerHTML = nav.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}${badge(k)}</a>`).join('');
-  bot.innerHTML = bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${icon(k)}${t}</a>`).join('')
+  bot.innerHTML = bottom.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}" aria-label="${t}">${icon(k)}${NAV_CURTO[k] || t}</a>`).join('')
     + (nav.length > 6 ? `<button id="b-mais" class="${bottom.some(([k]) => k === r) ? '' : 'on'}">${icon('menu')}Mais${S.pendentes ? ` <span class="badge count" style="font-size:.7rem">${S.pendentes}</span>` : ''}</button>` : '');
   const mais = document.getElementById('b-mais');
   if (mais) mais.onclick = () => {
@@ -627,7 +630,7 @@ function codigoNaoCadastrado(cod, aoVincular) {
         await recarregarProdutos();
         if (aoVincular) aoVincular(produtoPorCodigo(cod));
       };
-      b.querySelector('#vinc-novo').onclick = () => { close(); formProduto(null, () => { const p = produtoPorCodigo(cod); if (p && aoVincular) aoVincular(p); }, { codigo_barras: cod }); };
+      b.querySelector('#vinc-novo').onclick = () => { close(); formProduto(null, (info) => { const p = produtoPorCodigo(cod); if (p && aoVincular && !(info && info.entradas)) aoVincular(p); }, { codigo_barras: cod }); };
     },
   });
 }
@@ -638,7 +641,7 @@ const botaoCamera = (attr = 'data-cam') => `<button type="button" class="btn cam
 /* =========================================================
    SELETOR DE PRODUTO (usado em entrada, saída e ajustes)
    ========================================================= */
-function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = false, onUnidade, codigoSemProduto, bloquearTroca } = {}) {
+function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = false, onUnidade, codigoSemProduto, bloquearTroca, rodape, aoRodape } = {}) {
   let escolhido = null;
   // aplica um código lido (câmera, leitor de mão ou digitado + Enter)
   // onUnidade(produto, gs1|null, codigo): a tela trata série/lote/validade (próteses)
@@ -675,8 +678,10 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
       container.querySelector('[data-trocar]').onclick = () => { escolhido = null; desenhar(); onChange && onChange(null); container.querySelector('input').focus(); };
       return;
     }
-    container.innerHTML = `<div class="busca-linha"><input type="search" placeholder="Buscar produto" aria-label="Buscar produto por nome, tamanho ou código" autocomplete="off" enterkeyhint="search">${semLeitor ? '' : botaoCamera()}</div>
-      <div class="picker-results"></div>`;
+    container.innerHTML = `<div class="busca-pk">${semLeitor ? '' : `<button type="button" class="btn cam big" data-cam>${icon('camera')}<span>Ler código de barras</span></button>`}
+      <input type="search" placeholder="ou digite o nome ou o tamanho" aria-label="Buscar produto por nome, tamanho ou código" autocomplete="off" enterkeyhint="search"></div>
+      <div class="picker-results"></div>${rodape || ''}`;
+    const rod = container.querySelector('[data-pk-novo]'); if (rod && aoRodape) rod.onclick = aoRodape;
     const inp = container.querySelector('input');
     const cam = container.querySelector('[data-cam]');
     if (cam) cam.onclick = async () => { const cod = await lerCodigoCamera(); if (cod) aplicarCodigo(cod); };
@@ -696,7 +701,7 @@ function seletorProduto(container, { onChange, exigeSaldo = false, semLeitor = f
         const alvo = norm([p.nome, p.sku, p.marca, p.tipo, p.tamanho, p.cor, p.codigo_barras].join(' '));
         const palavras = alvo.split(/[\s·\-\/]+/);
         return termos.every((t) => (t.length === 1 ? palavras.includes(t) : t.length === 2 ? palavras.some((w) => w.startsWith(t)) : alvo.includes(t)));
-      }).slice(0, 60);
+      }).sort((a, b) => (exigeSaldo ? (b.saldo > 0) - (a.saldo > 0) : 0)).slice(0, 60); // na saída: o que tem estoque vem primeiro
       res.innerHTML = lista.length ? lista.map((p) => {
         const sem = exigeSaldo && p.saldo <= 0;
         return `<button type="button" class="pick-item" data-id="${p.id}" ${sem ? 'disabled' : ''}>
@@ -791,18 +796,20 @@ ROTAS.saida = async (el) => {
     <div class="field"><span class="label">3. Motivo</span><div id="sd-motivos">${pillsHtml('motivo', MOTIVOS_SAIDA, 'out')}</div></div>
     <div id="sd-pac" class="hidden">
       <div class="field"><label for="sd-nome">Nome da paciente</label><input id="sd-nome" type="text" autocomplete="off" autocapitalize="words"></div>
-      <div class="grid2">
-        <div class="field"><label for="sd-cir">Cirurgia</label><input id="sd-cir" type="text" list="dl-cir" autocomplete="off">${datalist('dl-cir', L.cirurgia)}</div>
-        <div class="field"><label for="sd-dcir">Data da cirurgia <span class="muted">(opcional)</span></label><input id="sd-dcir" type="date"></div>
-      </div>
+      <div class="field"><label for="sd-cir">Cirurgia <span class="muted">(opcional)</span></label><input id="sd-cir" type="text" list="dl-cir" autocomplete="off">${datalist('dl-cir', L.cirurgia)}</div>
     </div>
-    <div class="grid3" id="sd-valores">
-      <div class="field"><label for="sd-vu">Valor unitário (R$)</label><input id="sd-vu" type="text" inputmode="decimal"></div>
-      <div class="field"><label for="sd-desc">Desconto (R$)</label><input id="sd-desc" type="text" inputmode="decimal" placeholder="0,00"></div>
-      <div class="field"><label for="sd-pag">Forma de pagamento</label><select id="sd-pag">${optionsHtml(L.forma_pagamento, '', 'Selecione')}</select></div>
+    <div id="sd-valores">
+      <div class="field"><label for="sd-vu">Valor de cada ${'peça'} (R$)</label><input id="sd-vu" type="text" inputmode="decimal"></div>
+      <div class="field" id="sd-pag-campo"><span class="label">Forma de pagamento</span>
+        <div class="pills" id="sd-pag-pills">${PAG_COBRADO(L).map((o) => `<label class="pill"><input type="radio" name="pagp" value="${esc(o)}"><span>${esc(o)}</span></label>`).join('')}</div>
+        <select id="sd-pag" class="hidden" aria-hidden="true" tabindex="-1">${optionsHtml(L.forma_pagamento, '', 'Selecione')}</select></div>
     </div>
     <div class="total-line" id="sd-total-linha"><span>Total</span><span class="v" id="sd-total">${brl(0)}</span></div>
-    <div class="field"><label for="sd-obs">Observação <span class="muted">(opcional)</span></label><textarea id="sd-obs"></textarea></div>
+    <details class="mais"><summary>Mais opções <span class="muted">(desconto, data da cirurgia, observação)</span></summary>
+      <div class="field" id="sd-desc-campo"><label for="sd-desc">Desconto (R$)</label><input id="sd-desc" type="text" inputmode="decimal" placeholder="0,00"></div>
+      <div class="field" id="sd-dcir-campo"><label for="sd-dcir">Data da cirurgia</label><input id="sd-dcir" type="date"></div>
+      <div class="field"><label for="sd-obs">Observação</label><textarea id="sd-obs"></textarea></div>
+    </details>
     <button class="btn out block big" type="submit">Registrar saída</button>
   </form>`;
   const f = el.querySelector('#f-saida');
@@ -869,15 +876,13 @@ ROTAS.saida = async (el) => {
       const pr = !!(p && p.controla_serie);
       f.querySelector('#sd-qtd-campo').classList.toggle('hidden', pr);
       f.querySelector('#sd-unid').classList.toggle('hidden', !pr);
-      f.querySelector('#sd-valores').classList.toggle('hidden', pr);
-      f.querySelector('#sd-total-linha').classList.toggle('hidden', pr);
       // motivos conforme o produto (prótese: implantada, troca, devolução, perda)
       const lista = pr ? MOTIVOS_SAIDA_PROTESE : MOTIVOS_SAIDA;
-      const atual = motivo();
+      // o mais comum já vem marcado; se a pessoa escolheu outro e ele vale para este produto, fica
+      const atual = motivoTocado && lista.includes(motivo()) ? motivo() : lista[0];
       f.querySelector('#sd-motivos').innerHTML = pillsHtml('motivo', lista, 'out');
-      if (atual && lista.includes(atual)) f.querySelector(`input[name=motivo][value="${atual}"]`).checked = true;
-      else f.querySelector('#sd-pac').classList.add('hidden');
-      ligarMotivos();
+      f.querySelector(`input[name=motivo][value="${atual}"]`).checked = true;
+      ligarMotivos(); aoMudarMotivo();
       carregarUnids(p);
       f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo))); preencherValor(); calc();
     } });
@@ -896,15 +901,28 @@ ROTAS.saida = async (el) => {
     f.querySelector('#sd-total').textContent = brl(Math.max(t, 0));
   };
   f.addEventListener('input', calc);
-  const ligarMotivos = () => f.querySelectorAll('input[name=motivo]').forEach((r) => r.addEventListener('change', () => {
-    const m = motivo();
+  let motivoTocado = false;
+  const pagEscolhido = () => (f.querySelector('input[name=pagp]:checked') || {}).value || '';
+  const aoMudarMotivo = () => {
+    const m = motivo(); const pr = serial(); const tem = (x) => (L.forma_pagamento || []).includes(x);
+    const venda = MOTIVOS_VENDA.includes(m) && !pr, cobrado = m === 'Venda à paciente' && !pr;
     f.querySelector('#sd-pac').classList.toggle('hidden', !MOTIVOS_PACIENTE.includes(m));
-    if (m === 'Incluído no pacote cirúrgico') pag.value = (L.forma_pagamento || []).includes('Incluso no pacote') ? 'Incluso no pacote' : pag.value;
-    if (['Cortesia', 'Perda / avaria', 'Uso interno', 'Troca', 'Devolução ao fornecedor'].includes(m)) pag.value = (L.forma_pagamento || []).includes('Sem cobrança') ? 'Sem cobrança' : '';
+    // valor e pagamento só aparecem quando fazem sentido (venda); nos outros motivos vão zerados
+    f.querySelector('#sd-valores').classList.toggle('hidden', !venda);
+    f.querySelector('#sd-total-linha').classList.toggle('hidden', !venda);
+    f.querySelector('#sd-pag-campo').classList.toggle('hidden', !cobrado);
+    f.querySelector('#sd-desc-campo').classList.toggle('hidden', !venda);
+    f.querySelector('#sd-dcir-campo').classList.toggle('hidden', !MOTIVOS_PACIENTE.includes(m));
+    pag.value = cobrado ? pagEscolhido() : m === 'Incluído no pacote cirúrgico' ? (tem('Incluso no pacote') ? 'Incluso no pacote' : '') : (tem('Sem cobrança') ? 'Sem cobrança' : '');
+    if (!venda) desc.value = '';
+    const pc = pk && pk.get(); f.querySelector('label[for=sd-vu]').textContent = `Valor de cada ${pc && ehPorPar(pc.tipo) ? 'par' : 'peça'} (R$)`;
     if (serial()) desenharUnids();
     vuEditado = false; preencherValor(); calc();
-  }));
-  ligarMotivos();
+  };
+  f.querySelector('#sd-pag-pills').addEventListener('change', () => { if (motivo() === 'Venda à paciente') pag.value = pagEscolhido(); });
+  const ligarMotivos = () => f.querySelectorAll('input[name=motivo]').forEach((r) => r.addEventListener('change', () => { motivoTocado = true; aoMudarMotivo(); }));
+  const motivoPadrao = () => { const r = f.querySelector('input[name=motivo]'); if (r) r.checked = true; motivoTocado = false; aoMudarMotivo(); };
+  ligarMotivos(); motivoPadrao();
   f.onsubmit = async (e) => {
     e.preventDefault();
     const p = pk.get(); const m = motivo(); const q = quantidade();
@@ -918,6 +936,7 @@ ROTAS.saida = async (el) => {
     if (MOTIVOS_PACIENTE.includes(m) && !nome) return toast('Informe o nome da paciente.', 'err');
     const v = parseNum(vu.value), d = parseNum(desc.value);
     if (Number.isNaN(v) || Number.isNaN(d)) return toast('Confira os valores digitados.', 'err');
+    if (m === 'Venda à paciente' && !p.controla_serie && !pag.value) return toast('Escolha a forma de pagamento.', 'err');
     const res = await tentar(() => rpc('registrar_saida', { p: {
       produto_id: p.id, quantidade: q, motivo: m, valor_unitario: v, desconto: d || 0, forma_pagamento: pag.value || null,
       paciente_nome: MOTIVOS_PACIENTE.includes(m) ? nome : null, cirurgia: f.querySelector('#sd-cir').value.trim() || null,
@@ -929,7 +948,7 @@ ROTAS.saida = async (el) => {
     toast('Saída registrada.', 'ok');
     unids = []; marcadas = {};
     await recarregarProdutos();
-    f.reset(); pk.reset(); vuEditado = false; f.querySelector('#sd-pac').classList.add('hidden'); calc();
+    f.reset(); f.querySelector('details.mais').open = false; pk.reset(); vuEditado = false; motivoPadrao(); calc();
     comprovante(res);
   };
 };
@@ -950,14 +969,12 @@ ROTAS.entrada = async (el) => {
       <div class="btn-row" style="margin-top:10px"><button type="button" class="btn" id="en-add">+ Digitar prótese</button><button type="button" class="btn cam" id="en-cam">${icon('camera')}<span>Ler próxima caixa</span></button></div>
     </div>
     <div class="field"><span class="label">3. Motivo</span>${pillsHtml('motivo', MOTIVOS_ENTRADA, 'in')}</div>
-    <div class="grid2">
-      <div class="field"><label for="en-custo">Custo unitário (R$)</label><input id="en-custo" type="text" inputmode="decimal" placeholder="${isAdmin() ? '' : 'Deixe vazio para usar o custo cadastrado'}"></div>
+    <div class="field ${isAdmin() ? '' : 'hidden'}"><label for="en-custo">Custo de cada peça (R$)</label><input id="en-custo" type="text" inputmode="decimal"></div>
+    <details class="mais"><summary>Mais opções <span class="muted">(fornecedor, nota fiscal, observação)</span></summary>
       <div class="field"><label for="en-forn">Fornecedor</label><input id="en-forn" type="text" list="dl-forn" autocomplete="off">${datalist('dl-forn', L.fornecedor)}</div>
-    </div>
-    <div class="grid2">
-      <div class="field"><label for="en-nf">Nº da nota fiscal <span class="muted">(opcional)</span></label><input id="en-nf" type="text" autocomplete="off"></div>
-      <div class="field"><label for="en-obs">Observação <span class="muted">(opcional)</span></label><input id="en-obs" type="text" autocomplete="off"></div>
-    </div>
+      <div class="field"><label for="en-nf">Nº da nota fiscal</label><input id="en-nf" type="text" autocomplete="off"></div>
+      <div class="field"><label for="en-obs">Observação</label><input id="en-obs" type="text" autocomplete="off"></div>
+    </details>
     ${isAdmin() ? '<div class="total-line"><span>Total da entrada</span><span class="v" id="en-total">R$ 0,00</span></div>' : ''}
     <button class="btn in block big" type="submit">Registrar entrada</button>
   </form>`;
@@ -1001,7 +1018,13 @@ ROTAS.entrada = async (el) => {
     if (g) { addLinha({ serie: g.serie, lote: g.lote, incerto: g.incerto }); if (!g.serie) toast('O código não trouxe o nº de série: digite-o na linha.', ''); return; }
     if (produtoPorCodigo(cod)) { addLinha({}); return; } // leu o código do produto: abre linha para digitar a série
   };
+  let motivoTocado = false;
+  f.querySelectorAll('input[name=motivo]').forEach((r) => r.addEventListener('change', () => { motivoTocado = true; }));
+  const motivoPadrao = () => { motivoTocado = false; f.querySelector('input[name=motivo][value="Compra de fornecedor"]').checked = true; };
+  motivoPadrao();
   const pk = seletorProduto(f.querySelector('#pk'), { onUnidade: aoLerUnidade,
+    rodape: '<button type="button" class="btn block pk-novo" data-pk-novo>+ Produto novo? Cadastrar e já dar entrada</button>',
+    aoRodape: () => formProduto(null, () => { pk.reset(); }),
     bloquearTroca: (novo) => (linhas.length ? `Esta caixa é de outro produto (${novo.nome}). Registre primeiro as ${linhas.length} prótese(s) da lista, ou remova-as.` : null),
     codigoSemProduto: async (cod) => { // com uma prótese escolhida, um código solto é o nº de série da etiqueta
       if (!serial()) return false;
@@ -1010,15 +1033,16 @@ ROTAS.entrada = async (el) => {
     onChange: (p) => {
     const pr = !!(p && p.controla_serie);
     f.querySelector('#en-qtd-campo').classList.toggle('hidden', pr);
-    f.querySelector('#en-custo').closest('.field').classList.toggle('hidden', pr);
+    f.querySelector('#en-custo').closest('.field').classList.toggle('hidden', pr || !isAdmin());
+    // motivo mais comum já marcado (prótese: consignação), a não ser que a pessoa tenha escolhido outro
+    if (!motivoTocado) f.querySelector(`input[name=motivo][value="${pr ? 'Consignação recebida' : 'Compra de fornecedor'}"]`).checked = true;
     const tot = f.querySelector('#en-total'); if (tot) tot.closest('.total-line').classList.toggle('hidden', pr);
     f.querySelector('#en-unid').classList.toggle('hidden', !pr);
     if (!pr) linhas = [];
     desenharLinhas();
     f.querySelector('.qtd-par').classList.toggle('hidden', !(p && ehPorPar(p.tipo)));
     if (p && isAdmin() && p.custo !== undefined) custo.value = money2(p.custo);
-    if (!isAdmin()) custo.closest('.field').classList.add('hidden');
-    if (p && !forn.value) forn.value = p.fornecedor || '';
+    forn.value = p ? (p.fornecedor || '') : '';
     calc();
   } });
   bindStepper(f);
@@ -1044,7 +1068,7 @@ ROTAS.entrada = async (el) => {
     toast('Entrada registrada.', 'ok');
     linhas = [];
     await recarregarProdutos();
-    f.reset(); pk.reset(); calc();
+    f.reset(); f.querySelector('details.mais').open = false; motivoPadrao(); pk.reset(); calc();
     comprovante(res);
   };
 };
@@ -1490,7 +1514,7 @@ ROTAS.produtos = async (el) => {
   desenhar();
 };
 
-function formProduto(p, depois, inicial = {}) {
+function formProduto(p, depois, inicial = {}) { // depois({ entradas }) — entradas = nº de itens que já entraram no estoque pelo cadastro
   const L = S.listas; const novo = !p; p = p || { ativo: true, estoque_minimo: 0, ...inicial };
   const tamanhos = L.tamanho || [];
   modal(novo ? 'Novo produto' : 'Editar produto', `<form id="f-prod" novalidate>
@@ -1520,29 +1544,31 @@ function formProduto(p, depois, inicial = {}) {
     <div id="p-tams-bloco">${novo ? `<div class="field"><span class="label">Tamanhos</span><span class="hint">Marque um ou vários — cada tamanho vira um item de estoque.</span>
         <div class="pills">${tamanhos.map((t) => `<label class="pill"><input type="checkbox" name="tam" value="${esc(t)}"><span>${esc(t)}</span></label>`).join('')}</div></div>`
       : `<div class="field"><label for="p-tam">Tamanho</label><select id="p-tam">${optionsHtml([...new Set([...tamanhos, p.tamanho])], p.tamanho)}</select></div>`}</div>
-    <div class="grid3">
-      <div class="field" id="p-cor-campo"><label for="p-cor">Cor</label><input id="p-cor" type="text" value="${esc(p.cor)}"></div>
-      <div class="field"><label for="p-marca">Marca</label><input id="p-marca" type="text" value="${esc(p.marca)}"></div>
-      <div class="field"><label for="p-forn">Fornecedor</label><input id="p-forn" type="text" list="dl-pforn" value="${esc(p.fornecedor)}">${datalist('dl-pforn', L.fornecedor)}</div>
-    </div>
-    <div class="grid3" id="p-valores">
-      <div class="field" id="p-custo-campo"><label for="p-custo">Custo (R$)${isAdmin() ? '' : ' <span class="muted">(se souber)</span>'}</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
-      <div class="field" id="p-preco-campo"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
-      <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"><span class="hint">Quando o estoque chegar a esse número, aparece o aviso <b>repor</b>. Use 0 para não avisar.</span></div>
-    </div>
-    <p class="muted small" id="p-margem"></p>
-    ${novo ? `<div class="field"><span class="label">Código de barras de cada tamanho <span class="muted">(opcional)</span></span>
-      <span class="hint">Leia a embalagem de cada tamanho com a câmera ou o leitor de mão — cada tamanho tem um código diferente. Pode deixar vazio e gravar depois.</span>
+    ${novo ? `<div class="field"><span class="label" id="p-cbs-titulo">Código de barras e quantidade de cada tamanho</span>
+      <span class="hint" id="p-cbs-dica">Leia a embalagem de cada tamanho e diga quantas peças chegaram — o app já dá a entrada no estoque. Os dois são opcionais.</span>
       <div id="p-cbs" class="cb-lista"></div></div>`
     : `<div class="field"><label for="p-cb">Código de barras do fabricante <span class="muted">(opcional)</span></label>
       <div class="busca-linha"><input id="p-cb" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(p.codigo_barras)}" placeholder="Leia com a câmera ou o leitor de mão">${botaoCamera('data-cbcam')}</div>
       <span class="hint">Cada tamanho/cor tem o seu próprio código de barras.</span></div>`}
-    <div class="grid2 ${isGestor() ? '' : 'hidden'}">
-      <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
-      <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
-    </div>
-    <div class="field"><label for="p-obs">Observações</label><textarea id="p-obs">${esc(p.observacoes)}</textarea></div>
-    <div class="btn-row end">${novo || !isAdmin() ? '' : '<button type="button" class="btn danger" id="p-apagar">Apagar</button><button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
+    <div class="field" id="p-preco-campo"><label for="p-preco">Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" value="${money2(p.preco)}"></div>
+    <details class="mais" ${novo ? '' : 'open'}><summary>Mais opções <span class="muted">(cor, marca, fornecedor, estoque mínimo…)</span></summary>
+      <div class="grid3">
+        <div class="field" id="p-cor-campo"><label for="p-cor">Cor</label><input id="p-cor" type="text" value="${esc(p.cor)}"></div>
+        <div class="field"><label for="p-marca">Marca</label><input id="p-marca" type="text" value="${esc(p.marca)}"></div>
+        <div class="field"><label for="p-forn">Fornecedor</label><input id="p-forn" type="text" list="dl-pforn" value="${esc(p.fornecedor)}">${datalist('dl-pforn', L.fornecedor)}</div>
+      </div>
+      <div class="grid2" id="p-valores">
+        <div class="field" id="p-custo-campo"><label for="p-custo">Custo (R$)</label><input id="p-custo" type="text" inputmode="decimal" value="${money2(p.custo)}"></div>
+        <div class="field"><label for="p-min">Estoque mínimo</label><input id="p-min" type="number" inputmode="numeric" min="0" value="${p.estoque_minimo ?? 0}"><span class="hint">Quando o estoque chegar a esse número, aparece o aviso <b>repor</b>. Use 0 para não avisar.</span></div>
+      </div>
+      <p class="muted small" id="p-margem"></p>
+      <div class="grid2 ${isGestor() ? '' : 'hidden'}">
+        <div class="field"><label for="p-sku">Código (SKU)</label><input id="p-sku" type="text" value="${esc(novo ? '' : p.sku)}" placeholder="${novo ? 'Automático se vazio' : ''}" ${novo ? 'disabled title="Gerado automaticamente"' : ''}></div>
+        <div class="field"><span class="label">Situação</span><label class="check"><input type="checkbox" id="p-ativo" ${p.ativo ? 'checked' : ''}> Ativo (aparece para os operadores)</label></div>
+      </div>
+      <div class="field"><label for="p-obs">Observações</label><textarea id="p-obs">${esc(p.observacoes)}</textarea></div>
+    </details>
+    <div class="btn-row end">${novo || !isAdmin() ? '' : '<button type="button" class="btn danger" id="p-apagar">Apagar</button><button type="button" class="btn" id="p-hist">Histórico de preços</button>'}<button type="button" class="btn" data-x>Cancelar</button><button class="btn primary big" type="submit" id="p-salvar">Salvar</button></div>
   </form>`, {
     onMount(b, close) {
       const mg = () => { const c = parseNum(b.querySelector('#p-custo').value) || 0, v = parseNum(b.querySelector('#p-preco').value) || 0; b.querySelector('#p-margem').textContent = v ? `Margem: ${pct((v - c) / v)} · lucro por ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par' : 'peça'} ${brl(v - c)}` : ''; };
@@ -1573,6 +1599,8 @@ function formProduto(p, depois, inicial = {}) {
       });
       b.querySelector('#p-custo').oninput = mg; b.querySelector('#p-preco').oninput = mg; mg();
       const cbs = {}; // código de barras por tamanho (cadastro novo)
+      const qts = {}; // quantidade que chegou por tamanho (cadastro novo; vira entrada no estoque)
+      const qtDe = (k) => Math.max(0, parseInt(qts[k], 10) || 0);
       if (!novo) {
         b.querySelector('#p-cb').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
         b.querySelector('[data-cbcam]').onclick = async () => { const c = await lerCodigoCamera('Ler código de barras'); if (c) b.querySelector('#p-cb').value = c; };
@@ -1588,13 +1616,24 @@ function formProduto(p, depois, inicial = {}) {
           const n = ins.slice(ins.indexOf(atual) + 1).find((i) => !i.value.trim());
           if (n) n.focus(); else if (atual) atual.blur();
         };
+        const rotuloSalvar = () => {
+          const n = ehProtese(b.querySelector('#p-tipo').value) ? 0 : chaves().reduce((a, k) => a + qtDe(k), 0);
+          b.querySelector('#p-salvar').textContent = n ? `Salvar e dar entrada (${nf(n)})` : 'Salvar';
+        };
         const desenharCbs = () => {
           const ks = chaves();
           if (pendente && ks.length) { if (!cbs[ks[0]]) cbs[ks[0]] = pendente; pendente = ''; }
+          const prot = ehProtese(b.querySelector('#p-tipo').value);
+          b.querySelector('#p-cbs-titulo').textContent = prot ? 'Código de barras de cada volume (opcional)' : 'Código de barras e quantidade de cada tamanho';
+          b.querySelector('#p-cbs-dica').textContent = prot ? 'Leia a caixa de cada volume. A entrada das próteses é feita depois, em Entrada, lendo cada caixa (nº de série).'
+            : 'Leia a embalagem de cada tamanho e diga quantas chegaram — o app já dá a entrada no estoque. Os dois são opcionais.';
           box.innerHTML = ks.length ? ks.map((k) => `<div class="cb-linha"><span class="cb-tam">${esc(k)}</span>
-              <input data-cbt="${esc(k)}" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(cbs[k] || '')}" placeholder="Ler código do ${esc(k)}" aria-label="Código de barras do tamanho ${esc(k)}">
-              ${botaoCamera(`data-cbtcam="${esc(k)}"`)}</div>`).join('')
-            : `<p class="muted small">${pendente ? `Código lido: <b>${esc(pendente)}</b> — marque o tamanho dele acima.` : 'Marque o(s) tamanho(s) acima e aparece um campo de código para cada um.'}</p>`;
+              <input data-cbt="${esc(k)}" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(cbs[k] || '')}" placeholder="Código de barras" aria-label="Código de barras do tamanho ${esc(k)}">
+              ${botaoCamera(`data-cbtcam="${esc(k)}"`)}
+              ${prot ? '' : `<label class="cb-qt">Chegaram <input data-qt="${esc(k)}" type="number" inputmode="numeric" min="0" max="999" value="${esc(qts[k] || '')}" placeholder="0" aria-label="Quantidade que chegou do tamanho ${esc(k)}"> ${ehPorPar(b.querySelector('#p-tipo').value) ? 'par(es)' : 'peça(s)'}</label>`}</div>`).join('')
+            : `<p class="muted small">${pendente ? `Código lido: <b>${esc(pendente)}</b> — marque o tamanho dele acima.` : 'Marque o(s) tamanho(s) acima.'}</p>`;
+          box.querySelectorAll('input[data-qt]').forEach((i) => { i.oninput = () => { qts[i.dataset.qt] = i.value; rotuloSalvar(); }; i.onkeydown = (e) => { if (e.key === 'Enter') e.preventDefault(); }; });
+          rotuloSalvar();
           box.querySelectorAll('input[data-cbt]').forEach((i) => {
             i.oninput = () => { cbs[i.dataset.cbt] = i.value; };
             i.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); cbs[i.dataset.cbt] = i.value; if (i.value.trim()) proximo(i); } };
@@ -1653,6 +1692,7 @@ function formProduto(p, depois, inicial = {}) {
             if (outro) return toast(`O código do ${k} (${c}) já está gravado em: ${outro.nome}.`, 'err');
           }
         }
+        let entradas = 0, pecas = 0;
         const ok = await tentar(async () => {
           if (prot) {
             if (novo) { for (const v of volumes) await rpc('salvar_produto', { p: { ...base, tamanho: v + ' ml', codigo_barras: codDe(v + ' ml') } }); return volumes.length; }
@@ -1662,15 +1702,21 @@ function formProduto(p, depois, inicial = {}) {
           if (novo) {
             const tams = [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
             if (!tams.length) throw new Error('Marque pelo menos um tamanho.');
-            for (const t of tams) await rpc('salvar_produto', { p: { ...base, tamanho: t, codigo_barras: codDe(t) } });
+            for (const t of tams) {
+              const np = await rpc('salvar_produto', { p: { ...base, tamanho: t, codigo_barras: codDe(t) } });
+              if (qtDe(t) && np && np.id) { // já dá a entrada do que chegou
+                await rpc('registrar_entrada', { p: { produto_id: np.id, quantidade: qtDe(t), motivo: 'Compra de fornecedor', custo_unitario: base.custo || 0, fornecedor: base.fornecedor || null, observacao: 'Entrada no cadastro do produto' } });
+                entradas += 1; pecas += qtDe(t);
+              }
+            }
             return tams.length;
           }
           await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: val('#p-tam') } });
           return 1;
         }, e.submitter);
         if (!ok) return;
-        toast(novo ? `${ok} item(ns) cadastrado(s).` : 'Produto atualizado.', 'ok');
-        close(); await recarregarProdutos(); S.listas = (await rpc('listas')) || S.listas; depois && depois();
+        toast(novo ? `${ok} item(ns) cadastrado(s)${pecas ? ` e ${nf(pecas)} peça(s) no estoque` : ''}.` : 'Produto atualizado.', 'ok');
+        close(); await recarregarProdutos(); S.listas = (await rpc('listas')) || S.listas; depois && depois({ entradas });
       };
     },
   });

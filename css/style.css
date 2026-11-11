@@ -387,3 +387,24 @@ tr.estornado td { color: var(--ink-3); text-decoration: line-through; }
 .cb-linha input { min-width: 0; }
 @media (max-width: 420px) { .cb-linha .btn.cam span { display: none; } }
 .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+
+/* ---------- Telas mais simples (entrada, saída, cadastro) ---------- */
+.busca-pk { display: grid; gap: 8px; }
+.busca-pk .btn.cam { width: 100%; justify-content: center; min-height: 56px; font-size: 1.1rem; }
+.busca-pk .btn.cam span { display: inline !important; }
+.busca-pk input { width: 100%; min-height: 52px; }
+.pk-novo { margin-top: 8px; border-style: dashed; }
+details.mais { margin: 4px 0 16px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+details.mais > summary { cursor: pointer; padding: 14px 16px; font-weight: 700; color: var(--accent); list-style: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 52px; }
+details.mais > summary::-webkit-details-marker { display: none; }
+details.mais > summary::before { content: '+'; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid currentColor; font-size: 1.1rem; line-height: 1; flex: none; }
+details.mais[open] > summary::before { content: '–'; }
+details.mais > summary .muted { font-weight: 500; font-size: .9rem; }
+details.mais[open] > summary { border-bottom: 1px solid var(--line); }
+details.mais > :not(summary) { margin-left: 16px; margin-right: 16px; }
+details.mais > summary + * { margin-top: 14px; }
+.cb-linha { grid-template-columns: minmax(56px, auto) 1fr auto; padding: 10px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.cb-linha .cb-tam { grid-row: span 2; align-self: stretch; display: grid; place-items: center; }
+.cb-linha .cb-qt { grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink-2); }
+.cb-linha .cb-qt input { width: 92px; min-height: 48px; text-align: center; font-size: 1.2rem; font-weight: 700; }
+.bottomnav a, .bottomnav button { min-width: 0; padding: 0 2px; white-space: nowrap; }
