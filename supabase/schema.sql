@@ -719,6 +719,7 @@ begin
     end if;
     perform estoque._audit(u.id, 'produto_alterado', jsonb_build_object('antes', to_jsonb(ant), 'depois', to_jsonb(novo)));
   end if;
+  if u.perfil <> 'admin' then return to_jsonb(novo) - 'custo'; end if; -- custo só para o administrador
   return to_jsonb(novo);
 exception when unique_violation then
   get stacked diagnostics restr = constraint_name;
