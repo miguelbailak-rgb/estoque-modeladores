@@ -132,7 +132,9 @@ function modal(title, bodyHtml, { onMount, onClose, wide } = {}) {
     if (onClose) onClose();
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
-  back.addEventListener('click', (e) => { if (e.target === back || e.target.closest('[data-x]')) close(); });
+  let digitou = false; // depois de preencher algo, um toque fora da janela não joga o preenchimento fora
+  back.addEventListener('input', () => { digitou = true; });
+  back.addEventListener('click', (e) => { if ((e.target === back && !digitou) || e.target.closest('[data-x]')) close(); });
   document.addEventListener('keydown', onKey);
   root.appendChild(back);
   const body = back.querySelector('.modal-body');
@@ -170,11 +172,16 @@ async function rpc(fn, args = {}, { auth = true } = {}) {
   if (CFG.SUPABASE_KEY.startsWith('eyJ')) headers.Authorization = 'Bearer ' + CFG.SUPABASE_KEY;
   const body = auth ? { p_token: S.token, ...args } : args;
   let r;
+  // tempo-limite: sem ele, com a internet travada o botão ficava em "Aguarde…" para sempre
+  const ctl = new AbortController();
+  const limite = setTimeout(() => ctl.abort(), ['backup', 'movimentacoes', 'auditoria'].includes(fn) ? 60000 : 25000);
   try {
-    r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-  } catch {
-    throw new ApiError('Sem conexão com o servidor. Verifique a internet e tente de novo.');
-  }
+    r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal });
+  } catch (e) {
+    const gravacao = /^(registrar_|ajustar_|estornar|decidir_)/.test(fn);
+    throw new ApiError((e && e.name === 'AbortError' ? 'O servidor demorou demais para responder. Verifique a internet e tente de novo.' : 'Sem conexão com o servidor. Verifique a internet e tente de novo.')
+      + (gravacao ? ' Antes de repetir, confira em Lançamentos se já não foi registrado.' : ''));
+  } finally { clearTimeout(limite); }
   const txt = await r.text();
   let data = null;
   try { data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
@@ -1413,6 +1420,19 @@ function grafico(canvas, cfg) {
   graficos.push(new window.Chart(canvas, { ...cfg, options: { responsive: true, maintainAspectRatio: false, animation: false, ...(cfg.options || {}) } }));
 }
 const corVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const telaEstreita = () => window.innerWidth < 600;
+// nome do produto no eixo do gráfico: no celular quebra em até 3 linhas curtas (antes o começo do nome era cortado)
+function rotuloGrafico(l) {
+  l = String(l ?? '');
+  if (!telaEstreita()) return l.length > 36 ? l.slice(0, 35) + '…' : l;
+  const linhas = [''];
+  for (const w of l.split(/\s+/)) {
+    const i = linhas.length - 1;
+    if (!linhas[i]) linhas[i] = w; else if ((linhas[i] + ' ' + w).length <= 15) linhas[i] += ' ' + w; else linhas.push(w);
+  }
+  if (linhas.length > 3) { linhas.length = 3; linhas[2] = linhas[2].slice(0, 13) + '…'; }
+  return linhas.map((x) => (x.length > 16 ? x.slice(0, 15) + '…' : x));
+}
 const limparGraficos = () => { while (graficos.length) graficos.pop().destroy(); };
 window.addEventListener('hashchange', limparGraficos);
 
@@ -1437,6 +1457,7 @@ ROTAS.painel = async (el) => {
   const valCusto = sum(S.produtos, (p) => Math.max(p.saldo, 0) * p.custo);
   const valVenda = sum(S.produtos, (p) => Math.max(p.saldo, 0) * p.preco);
   const nomeMes = new Intl.DateTimeFormat('pt-BR', { month: 'long', timeZone: 'UTC' }).format(new Date(mes + 'T12:00:00Z'));
+  const semCusto = vendasMes.filter((m) => !Number(m.custo_unitario)).length; // venda sem custo = lucro "cheio", que não é real
 
   el.innerHTML = `<div class="page-head"><h1>Painel</h1><span class="muted">Mês de ${esc(nomeMes)}</span></div>
     ${S.pendentes ? `<a href="#/estornos" class="warn-box" style="display:block;text-decoration:none"><b>${S.pendentes}</b> pedido(s) de estorno aguardando sua aprovação →</a>` : ''}
@@ -1452,6 +1473,7 @@ ROTAS.painel = async (el) => {
         void venc; void v90; const rep = pr.filter((p) => p.ativo && p.estoque_minimo > 0 && p.saldo <= p.estoque_minimo).length;
         return `<a class="kpi ${rep ? 'alert' : ''}" href="#/proteses" style="text-decoration:none;color:inherit"><div class="k-label">Próteses em estoque</div><div class="k-val">${nf(sum(pr, (p) => Math.max(p.saldo, 0)))}</div><div class="k-sub">${rep ? `${nf(rep)} volume(s) para repor` : 'ver por volume'}</div></a>`; })() : ''}
     </div>
+    ${semCusto ? `<div class="info-box"><b>${nf(semCusto)} de ${nf(vendasMes.length)}</b> venda(s) do mês são de produtos sem custo cadastrado, então o lucro e a margem aparecem maiores do que são. Preencha o custo em <a href="#/produtos">Produtos</a> para as próximas vendas saírem certas.</div>` : ''}
     <div class="cols2">
       <div class="card"><h2>Faturamento e lucro — últimos 6 meses</h2><div class="chart-box"><canvas id="g-meses"></canvas></div></div>
       <div class="card"><h2>Mais vendidos no mês</h2><div class="chart-box"><canvas id="g-top"></canvas></div></div>
@@ -1474,7 +1496,7 @@ ROTAS.painel = async (el) => {
     options: { plugins: { tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + brl(c.raw) } } }, scales: { y: { ticks: { callback: (v) => brl(v).replace(',00', '') } } } } });
   const top = Object.entries(groupBy(vendasMes, (m) => m.produto)).map(([k, v]) => [k, sum(v, (m) => -m.qtd)]).sort((a, b) => b[1] - a[1]).slice(0, 6);
   if (!top.length) el.querySelector('#g-top').parentElement.innerHTML = '<div class="empty">Ainda não há vendas neste mês.</div>';
-  else grafico(el.querySelector('#g-top'), { type: 'bar', data: { labels: top.map((t) => t[0].length > 34 ? t[0].slice(0, 33) + '…' : t[0]), datasets: [{ label: 'Peças', data: top.map((t) => t[1]), backgroundColor: corVar('--out'), borderRadius: 4, maxBarThickness: 40 }] },
+  else grafico(el.querySelector('#g-top'), { type: 'bar', data: { labels: top.map((t) => rotuloGrafico(t[0])), datasets: [{ label: 'Peças', data: top.map((t) => t[1]), backgroundColor: corVar('--out'), borderRadius: 4, maxBarThickness: 40 }] },
     options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { ticks: { precision: 0 } } } } });
 };
 
@@ -1490,12 +1512,13 @@ ROTAS.produtos = async (el) => {
     ${isGestor() || !ate ? '' : `<div class="info-box">Alteração de produtos liberada para você até <b>${esc(dt(ate.toISOString()))}</b>.</div>`}
     <div class="toolbar"><div class="field grow"><label for="pr-q">Buscar</label><div class="busca-linha"><input id="pr-q" type="search" placeholder="Nome, tamanho, código, marca…" enterkeyhint="search">${botaoCamera()}</div></div>
     <label class="check ${isGestor() ? '' : 'hidden'}"><input type="checkbox" id="pr-inat"> Mostrar inativos</label></div>
+    ${gest ? '<p class="muted small" style="margin:0 0 8px">Toque em um produto para editar.</p>' : ''}
     <div class="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th>${adm ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${adm ? '<th class="num">Margem</th>' : ''}<th class="num">Mín.</th><th class="num">Saldo</th>${gest ? '<th></th>' : ''}</tr></thead><tbody id="pr-body"></tbody></table></div>`;
   const q = el.querySelector('#pr-q'), inat = el.querySelector('#pr-inat');
   const desenhar = () => {
     const termos = norm(q.value).split(/\s+/).filter(Boolean);
     const lista = S.produtos.filter((p) => inat.checked || p.ativo).filter((p) => { const a = norm([p.nome, p.sku, p.marca, p.fornecedor, p.codigo_barras].join(' ')); return termos.every((t) => a.includes(t)); });
-    el.querySelector('#pr-body').innerHTML = lista.length ? lista.map((p) => `<tr class="${p.ativo ? '' : 'estornado'}">
+    el.querySelector('#pr-body').innerHTML = lista.length ? lista.map((p) => `<tr class="${p.ativo ? '' : 'estornado'} ${gest ? 'clic' : ''}" ${gest ? `data-edl="${p.id}"` : ''}>
       <td class="nowrap">${esc(p.sku)}${p.codigo_barras ? `<div class="small muted">${esc(p.codigo_barras)}</div>` : ''}</td><td>${esc(p.nome)}<div class="small muted">${esc([p.marca, p.fornecedor].filter(Boolean).join(' · '))}</div></td>
       ${adm ? `<td class="num">${p.controla_serie ? '—' : brl(p.custo)}</td>` : ''}<td class="num">${p.controla_serie ? '—' : brl(p.preco)}</td>${adm ? `<td class="num">${p.controla_serie ? '—' : pct(p.preco ? (p.preco - p.custo) / p.preco : NaN)}</td>` : ''}
       <td class="num">${nf(p.estoque_minimo)}</td><td class="num"><b>${nf(p.saldo)}</b></td>
@@ -1511,7 +1534,8 @@ ROTAS.produtos = async (el) => {
   aoLerCodigo = abrirCodigo;
   el.querySelector('[data-cam]').onclick = async () => { const c = await lerCodigoCamera(); if (c) abrirCodigo(c); };
   q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = limpaCodigo(q.value); if (produtoPorCodigo(v) || /^[0-9]{6,}$/.test(v)) abrirCodigo(v); } });
-  el.querySelector('#pr-body').onclick = (e) => { const b = e.target.closest('[data-ed]'); if (b) formProduto(S.produtos.find((p) => p.id === Number(b.dataset.ed)), desenhar); };
+  // tocar em qualquer ponto da linha abre a edição (no celular o botão Editar fica fora da tela, à direita)
+  el.querySelector('#pr-body').onclick = (e) => { const b = e.target.closest('[data-ed],[data-edl]'); if (b) formProduto(S.produtos.find((p) => p.id === Number(b.dataset.ed || b.dataset.edl)), desenhar); };
   aoAtualizarDados = () => { if (el.isConnected) desenhar(); };
   desenhar();
 };
@@ -1600,6 +1624,7 @@ function formProduto(p, depois, inicial = {}) { // depois({ entradas }) — entr
         mg();
       });
       b.querySelector('#p-custo').oninput = mg; b.querySelector('#p-preco').oninput = mg; mg();
+      const feitos = {}; // tamanho -> { id, entrou }: o que já foi gravado, para uma nova tentativa não repetir
       const cbs = {}; // código de barras por tamanho (cadastro novo)
       const qts = {}; // quantidade que chegou por tamanho (cadastro novo; vira entrada no estoque)
       const qtDe = (k) => Math.max(0, parseInt(qts[k], 10) || 0);
@@ -1691,13 +1716,29 @@ function formProduto(p, depois, inicial = {}) { // depois({ entradas }) — entr
             if (vistos[c]) return toast(`O mesmo código foi lido no ${vistos[c]} e no ${k}. Cada tamanho tem um código diferente — confira.`, 'err');
             vistos[c] = k;
             const outro = produtoPorCodigo(c);
-            if (outro) return toast(`O código do ${k} (${c}) já está gravado em: ${outro.nome}.`, 'err');
+            if (outro && !(feitos[k] && feitos[k].id === outro.id)) return toast(`O código do ${k} (${c}) já está gravado em: ${outro.nome}.`, 'err');
+          }
+          // mesmo tipo, modelo, tamanho e cor de um produto que já existe = cadastro repetido (o estoque ficaria dividido em dois)
+          const igual = (a, c) => norm(a).trim() === norm(c).trim();
+          for (const k of ks) {
+            if (feitos[k] && feitos[k].id) continue;
+            const ja = S.produtos.find((x) => igual(x.tipo, base.tipo) && igual(x.modelo, base.modelo) && igual(x.tamanho, k) && igual(x.cor, base.cor)
+              && (!norm(x.marca).trim() || !norm(base.marca).trim() || igual(x.marca, base.marca)));
+            if (ja) return toast(ja.ativo
+              ? `O tamanho ${k} já está cadastrado: ${ja.nome} (${ja.sku}). Desmarque esse tamanho aqui e registre o que chegou na tela Entrada.`
+              : `O tamanho ${k} já está cadastrado, mas inativo: ${ja.nome} (${ja.sku}). Peça ao administrador ou ao gerente para reativar.`, 'err');
           }
         }
         let entradas = 0, pecas = 0;
         const ok = await tentar(async () => {
           if (prot) {
-            if (novo) { for (const v of volumes) await rpc('salvar_produto', { p: { ...base, tamanho: v + ' ml', codigo_barras: codDe(v + ' ml') } }); return volumes.length; }
+            if (novo) {
+              for (const v of volumes) {
+                const k = v + ' ml'; const f = feitos[k] || (feitos[k] = {});
+                if (!f.id) { const np = await rpc('salvar_produto', { p: { ...base, tamanho: k, codigo_barras: codDe(k) } }); f.id = (np && np.id) || -1; }
+              }
+              return volumes.length;
+            }
             await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: volumes[0] + ' ml' } });
             return 1;
           }
@@ -1705,18 +1746,20 @@ function formProduto(p, depois, inicial = {}) { // depois({ entradas }) — entr
             const tams = [...b.querySelectorAll('input[name=tam]:checked')].map((x) => x.value);
             if (!tams.length) throw new Error('Marque pelo menos um tamanho.');
             for (const t of tams) {
-              const np = await rpc('salvar_produto', { p: { ...base, tamanho: t, codigo_barras: codDe(t) } });
-              if (qtDe(t) && np && np.id) { // já dá a entrada do que chegou
-                await rpc('registrar_entrada', { p: { produto_id: np.id, quantidade: qtDe(t), motivo: 'Compra de fornecedor', custo_unitario: base.custo || 0, fornecedor: base.fornecedor || null, observacao: 'Entrada no cadastro do produto' } });
-                entradas += 1; pecas += qtDe(t);
+              const f = feitos[t] || (feitos[t] = {});
+              if (!f.id) { const np = await rpc('salvar_produto', { p: { ...base, tamanho: t, codigo_barras: codDe(t) } }); f.id = (np && np.id) || -1; }
+              if (qtDe(t) && f.id > 0 && !f.entrou) { // já dá a entrada do que chegou
+                await rpc('registrar_entrada', { p: { produto_id: f.id, quantidade: qtDe(t), motivo: 'Compra de fornecedor', custo_unitario: base.custo || 0, fornecedor: base.fornecedor || null, observacao: 'Entrada no cadastro do produto' } });
+                f.entrou = qtDe(t);
               }
             }
+            tams.forEach((t) => { if (feitos[t].entrou) { entradas += 1; pecas += feitos[t].entrou; } });
             return tams.length;
           }
           await rpc('salvar_produto', { p: { ...base, id: p.id, sku: val('#p-sku'), tamanho: val('#p-tam') } });
           return 1;
         }, e.submitter);
-        if (!ok) return;
+        if (!ok) { if (Object.keys(feitos).length) recarregarProdutos().catch(() => {}); return; } // parte pode ter sido gravada: atualiza a lista
         toast(novo ? `${ok} item(ns) cadastrado(s)${pecas ? ` e ${nf(pecas)} peça(s) no estoque` : ''}.` : 'Produto atualizado.', 'ok');
         close(); await recarregarProdutos(); S.listas = (await rpc('listas')) || S.listas; depois && depois({ entradas });
       };
@@ -1937,8 +1980,11 @@ function montarRelatorio(tipo, { movs, prods }) {
     const rows = prods.filter((p) => p.ativo || p.saldo !== 0).map((p) => ({ sku: p.sku, nome: p.nome, saldo: p.saldo, minimo: p.estoque_minimo, custo: p.custo, vcusto: Math.max(p.saldo, 0) * p.custo, preco: p.preco, vvenda: Math.max(p.saldo, 0) * p.preco }));
     R.kpis = [['Itens', nf(rows.length)], ['Unidades', nf(sum(rows, (r) => Math.max(r.saldo, 0)))], ['Valor a custo', brl(sum(rows, (r) => r.vcusto))], ['Valor a preço de venda', brl(sum(rows, (r) => r.vvenda))]];
     R.secoes.push({ cols: [C('Código', 'sku'), C('Produto', 'nome'), C('Saldo', 'saldo', 'int'), C('Mínimo', 'minimo', 'int'), C('Custo un.', 'custo', 'brl'), C('Valor custo', 'vcusto', 'brl'), C('Preço', 'preco', 'brl'), C('Valor venda', 'vvenda', 'brl')], rows, totais: ['saldo', 'vcusto', 'vvenda'] });
-    const porTipo = Object.entries(groupBy(rows, (r) => prods.find((p) => p.sku === r.sku).tipo)).map(([k, v]) => [k, sum(v, (r) => r.vcusto)]);
-    R.grafico = { type: 'doughnut', labels: porTipo.map((x) => x[0]), data: porTipo.map((x) => x[1]), label: 'Valor a custo', moeda: true };
+    const grupos = Object.entries(groupBy(rows, (r) => prods.find((p) => p.sku === r.sku).tipo));
+    const porTipo = grupos.map(([k, v]) => [k, sum(v, (r) => r.vcusto)]);
+    // sem custo cadastrado (ou para quem não vê custo), o gráfico mostra as unidades em vez de ficar em branco
+    if (isAdmin() && sum(porTipo, (x) => x[1]) > 0) R.grafico = { type: 'doughnut', labels: porTipo.map((x) => x[0]), data: porTipo.map((x) => x[1]), label: 'Valor a custo', moeda: true };
+    else R.grafico = { type: 'doughnut', labels: grupos.map((x) => x[0]), data: grupos.map(([, v]) => sum(v, (r) => Math.max(r.saldo, 0))), label: 'Unidades' };
   }
 
   if (tipo === 'movimentacoes') {
@@ -2040,7 +2086,7 @@ function desenharRelatorio(out, R) {
     <h2 style="margin-top:8px">${esc(R.titulo)}</h2>
     <p class="muted">${esc(R.periodo)}${R.filtros ? ' · ' + esc(R.filtros) : ''} · gerado em ${dt(new Date().toISOString())} por ${esc(S.user.nome)}</p>
     ${R.kpis.length ? `<div class="kpis">${R.kpis.map(([k, v]) => `<div class="kpi"><div class="k-label">${esc(k)}</div><div class="k-val" style="font-size:1.25rem">${v}</div></div>`).join('')}</div>` : ''}
-    ${R.grafico && R.grafico.data.length ? '<div class="card"><div class="chart-box"><canvas id="rl-graf"></canvas></div></div>' : ''}
+    ${R.grafico && R.grafico.data.some((v) => v > 0) ? `<div class="card"><h3 style="margin:0 0 8px">${esc(R.grafico.label || '')}</h3><div class="chart-box"><canvas id="rl-graf"></canvas></div></div>` : ''}
     ${R.secoes.map((s) => `${s.titulo ? `<h3 style="margin-top:18px">${esc(s.titulo)}</h3>` : ''}
       ${s.rows.length ? `<div class="table-wrap"><table><thead><tr>${s.cols.map((c) => `<th class="${ehNum(c.fmt) ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
       <tbody>${s.rows.map((r) => `<tr class="${r._risca ? 'estornado' : ''}">${s.cols.map((c) => `<td class="${ehNum(c.fmt) ? 'num' : ''}">${esc(fmtCel(r[c.key], c.fmt))}</td>`).join('')}</tr>`).join('')}</tbody>
@@ -2048,12 +2094,12 @@ function desenharRelatorio(out, R) {
       </table></div>` : '<div class="empty">Sem dados para este período e filtros.</div>'}`).join('')}
     ${R.nota ? `<p class="muted small" style="margin-top:12px">${esc(R.nota)}</p>` : ''}`;
   const g = R.grafico;
-  if (g && g.data.length) {
+  if (g && g.data.some((v) => v > 0)) {
     const paleta = ['--accent', '--out', '--in', '--warn', '--ink-3'].map(corVar).concat(['#7a5cc4', '#c25e9b', '#3a87c9', '#8a7a3a']);
     const fmt = (v) => (g.moeda ? brl(v) : nf(v));
     grafico(out.querySelector('#rl-graf'), g.type === 'doughnut'
-      ? { type: 'doughnut', data: { labels: g.labels, datasets: [{ data: g.data, backgroundColor: paleta, borderWidth: 2, borderColor: corVar('--surface') }] }, options: { plugins: { legend: { position: 'right' }, tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.raw) } } } } }
-      : { type: 'bar', data: { labels: g.labels.map((l) => (l.length > 36 ? l.slice(0, 35) + '…' : l)), datasets: [{ label: g.label, data: g.data, backgroundColor: corVar('--accent'), borderRadius: 4, maxBarThickness: 48 }] },
+      ? { type: 'doughnut', data: { labels: g.labels, datasets: [{ data: g.data, backgroundColor: paleta, borderWidth: 2, borderColor: corVar('--surface') }] }, options: { plugins: { legend: { position: telaEstreita() ? 'bottom' : 'right' }, tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.raw) } } } } }
+      : { type: 'bar', data: { labels: g.labels.map((l) => (g.horizontal ? rotuloGrafico(l) : (l.length > 36 ? l.slice(0, 35) + '…' : l))), datasets: [{ label: g.label, data: g.data, backgroundColor: corVar('--accent'), borderRadius: 4, maxBarThickness: 48 }] },
         options: { indexAxis: g.horizontal ? 'y' : 'x', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.raw) } } }, scales: { [g.horizontal ? 'x' : 'y']: { ticks: { precision: 0, callback: (v) => (g.moeda ? brl(v).replace(',00', '') : nf(v)) } } } } });
   }
 }

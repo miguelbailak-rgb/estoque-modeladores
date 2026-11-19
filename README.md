@@ -83,6 +83,13 @@ Em **Usuários**, no operador, toque em **Liberar alteração de produtos** e es
 Enquanto durar, aparece o botão **Editar** em Produtos (nome, tamanho, preço de venda, estoque mínimo, código de barras). Ele continua sem ver custos, sem ajustar contagem, apagar ou inativar produtos.
 A liberação termina sozinha; dá para encerrar antes com **Encerrar liberação**. Tudo fica na Auditoria.
 
+### Proteções contra erro
+
+- **Cadastro repetido**: o app não deixa cadastrar de novo um produto com o mesmo tipo, modelo, tamanho e cor (o estoque ficaria dividido em dois); avisa qual já existe e manda usar a **Entrada**.
+- **Internet caiu no meio**: se a gravação de vários tamanhos parar na metade, ao tentar de novo o app só grava o que faltou (não repete produto nem entrada).
+- **Servidor sem resposta**: depois de 25 segundos o app avisa e libera o botão; em entradas e saídas, lembra de conferir em **Lançamentos** antes de repetir.
+- **Formulário preenchido** não fecha com um toque fora da janela (só em Cancelar, no × ou com Esc).
+
 ### Etiquetas (folha Pimaco A4360/A4260)
 
 Cada folha é montada em milímetros exatos (3 × 7, 63,5 × 38,1 mm). Na janela de impressão: papel **A4**, escala **100%** e **desmarque "Imprimir cabeçalhos e rodapés"**.

@@ -418,3 +418,10 @@ details.mais > summary + * { margin-top: 14px; }
   .et-tab [data-q] { width: 68px; }
   .et-saldo-cel { display: inline; }
 }
+
+/* Produtos: a linha inteira abre a edição */
+tr.clic { cursor: pointer; }
+tr.clic:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+/* contador de pedidos no botão "Mais": fica no canto do ícone, sem empurrar o botão para fora da barra */
+.bottomnav button { position: relative; }
+.bottomnav .badge.count { position: absolute; top: 5px; left: calc(50% + 6px); min-width: 20px; padding: 1px 6px; }
