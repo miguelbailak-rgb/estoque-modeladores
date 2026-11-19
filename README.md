@@ -83,6 +83,12 @@ Em **Usuários**, no operador, toque em **Liberar alteração de produtos** e es
 Enquanto durar, aparece o botão **Editar** em Produtos (nome, tamanho, preço de venda, estoque mínimo, código de barras). Ele continua sem ver custos, sem ajustar contagem, apagar ou inativar produtos.
 A liberação termina sozinha; dá para encerrar antes com **Encerrar liberação**. Tudo fica na Auditoria.
 
+### Banco sempre acordado (plano gratuito do Supabase)
+
+O plano gratuito do Supabase **pausa o projeto depois de cerca de 7 dias sem uso**; o app então mostra "Sem conexão com o servidor". Para evitar isso, o agendamento `.github/workflows/keepalive.yml` acessa o banco duas vezes por dia (função `ping`, que não devolve dado nenhum). Se o acesso falhar, o GitHub manda um e-mail avisando.
+
+Se mesmo assim o projeto pausar: entre em supabase.com, abra o projeto e clique em **Resume project**. Os dados ficam guardados.
+
 ### Proteções contra erro
 
 - **Cadastro repetido**: o app não deixa cadastrar de novo um produto com o mesmo tipo, modelo, tamanho e cor (o estoque ficaria dividido em dois); avisa qual já existe e manda usar a **Entrada**.

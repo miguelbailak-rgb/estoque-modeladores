@@ -1,0 +1,36 @@
+# Mantém o banco de dados (Supabase, plano gratuito) acordado.
+# O Supabase pausa o projeto depois de cerca de 7 dias sem uso; este agendamento
+# acessa o banco duas vezes por dia. Se o acesso falhar, o GitHub manda um e-mail
+# ao dono do repositório avisando que a execução falhou.
+name: Manter o banco ativo
+
+on:
+  schedule:
+    - cron: '17 9 * * *'   # todo dia às 06:17 (Brasília)
+    - cron: '43 21 * * *'  # todo dia às 18:43 (Brasília)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Acessar o banco
+        run: |
+          URL=$(grep -oE 'SUPABASE_URL: *"[^"]+"' js/config.js | cut -d'"' -f2)
+          KEY=$(grep -oE 'SUPABASE_KEY: *"[^"]+"' js/config.js | cut -d'"' -f2)
+          code=$(curl -sS -o resposta.txt -w '%{http_code}' --retry 3 --retry-delay 20 --retry-all-errors --max-time 30 \
+            -X POST "$URL/rest/v1/rpc/ping" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}')
+          cat resposta.txt; echo; echo "HTTP $code"
+          test "$code" = "200"
+      # o GitHub desliga agendamentos de repositórios sem atividade por 60 dias; isto renova o prazo
+      - name: Manter este agendamento ligado
+        if: always()
+        run: gh workflow enable keepalive.yml --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

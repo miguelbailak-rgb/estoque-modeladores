@@ -1048,6 +1048,16 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- SINAL DE VIDA: o plano gratuito do Supabase pausa o projeto depois de cerca
+-- de 7 dias sem uso. Um agendamento do GitHub (.github/workflows/keepalive.yml)
+-- chama esta função todo dia. Ela só consulta o banco e não devolve dado nenhum.
+-- ---------------------------------------------------------------------
+create or replace function public.ping() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('ok', (select count(*) from estoque.produtos) >= 0, 'agora', now());
+$$;
+
+-- ---------------------------------------------------------------------
 -- PERMISSÕES: o site (papel "anon") só executa estas funções
 -- ---------------------------------------------------------------------
 revoke all on all functions in schema estoque from public;
@@ -1063,7 +1073,7 @@ begin
       'solicitar_estorno(text,bigint,text)','salvar_produto(text,jsonb)','historico_precos(text,int)',
       'ajustar_inventario(text,int,int,text)','estornos(text,text)','decidir_estorno(text,int,boolean,text)',
       'estornar(text,bigint,text)','movimentacoes(text,date,date)','usuarios(text)','salvar_usuario(text,jsonb)',
-      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','apagar_produto(text,int,text)','unidades(text,int,text,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)']
+      'redefinir_senha(text,int,text)','vincular_codigo(text,int,text)','apagar_produto(text,int,text)','unidades(text,int,text,text)','liberar_cadastro(text,int,timestamptz)','auditoria(text,date,date)','salvar_lista(text,text,jsonb)','backup(text)','ping()']
     loop
       execute format('revoke all on function public.%s from public', f);
       execute format('grant execute on function public.%s to anon, authenticated', f);
